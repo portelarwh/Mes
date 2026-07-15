@@ -1,0 +1,859 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0d0d0d">
+<title>MES — Apontamento de Produção</title>
+<link rel="manifest" href="manifest.json">
+<style>
+  /* ============ Tokens (claro / escuro) ============ */
+  :root {
+    color-scheme: light;
+    --page:      #f9f9f7;
+    --surface:   #fcfcfb;
+    --ink:       #0b0b0b;
+    --ink-2:     #52514e;
+    --muted:     #898781;
+    --grid:      #e1e0d9;
+    --baseline:  #c3c2b7;
+    --ring:      rgba(11,11,11,.10);
+    --accent:    #2a78d6;   /* azul — produção / métricas */
+    --accent-soft: #cde2fb;
+    --st-prod:   #2a78d6;   /* produzindo */
+    --st-stop:   #e34948;   /* parada */
+    --st-idle:   #4a3aa7;   /* ociosa (sem insumo) */
+    --st-wait:   #eda100;   /* esperando linha à frente */
+    --good:      #006300;
+    --bad:       #d03b3b;
+    --track:     #eceae4;
+    --btn-ink:   #ffffff;
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page:      #0d0d0d;
+    --surface:   #1a1a19;
+    --ink:       #ffffff;
+    --ink-2:     #c3c2b7;
+    --muted:     #898781;
+    --grid:      #2c2c2a;
+    --baseline:  #383835;
+    --ring:      rgba(255,255,255,.10);
+    --accent:    #3987e5;
+    --accent-soft: #16324f;
+    --st-prod:   #3987e5;
+    --st-stop:   #e66767;
+    --st-idle:   #9085e9;
+    --st-wait:   #c98500;
+    --good:      #0ca30c;
+    --bad:       #e66767;
+    --track:     #2c2c2a;
+    --btn-ink:   #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink-2:#c3c2b7;
+      --muted:#898781; --grid:#2c2c2a; --baseline:#383835; --ring:rgba(255,255,255,.10);
+      --accent:#3987e5; --accent-soft:#16324f;
+      --st-prod:#3987e5; --st-stop:#e66767; --st-idle:#9085e9; --st-wait:#c98500;
+      --good:#0ca30c; --bad:#e66767; --track:#2c2c2a; --btn-ink:#fff;
+    }
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page); color: var(--ink);
+    padding-bottom: calc(64px + env(safe-area-inset-bottom));
+    max-width: 560px; margin: 0 auto;
+  }
+  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+  input, select { font: inherit; color: var(--ink); }
+
+  /* ============ Header ============ */
+  header {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; align-items: center; gap: 8px;
+    padding: calc(10px + env(safe-area-inset-top)) 14px 10px;
+    background: var(--page); border-bottom: 1px solid var(--grid);
+  }
+  header h1 { font-size: 17px; font-weight: 700; flex: 1; }
+  .ver {
+    font-size: 11px; font-weight: 600; color: var(--ink-2);
+    border: 1px solid var(--ring); border-radius: 999px; padding: 3px 8px;
+    font-variant-numeric: tabular-nums;
+  }
+  .icon-btn {
+    width: 34px; height: 34px; border-radius: 10px; border: 1px solid var(--ring);
+    display: grid; place-items: center; font-size: 16px; background: var(--surface);
+  }
+  .wake { font-size: 10px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+  .wake .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+  .wake.on .dot { background: var(--good); }
+
+  /* ============ Layout ============ */
+  main { padding: 14px; display: grid; gap: 14px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--ring);
+    border-radius: 16px; padding: 16px;
+  }
+  .card h2 { font-size: 13px; font-weight: 700; color: var(--ink-2); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 12px; }
+  .hint { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+
+  /* ============ Tabs ============ */
+  nav {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 20;
+    max-width: 560px; margin: 0 auto;
+    display: grid; grid-template-columns: 1fr 1fr 1fr;
+    background: var(--surface); border-top: 1px solid var(--grid);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  nav button { padding: 10px 4px 8px; display: grid; gap: 2px; justify-items: center; color: var(--muted); font-size: 11px; font-weight: 600; }
+  nav button .ico { font-size: 19px; }
+  nav button.active { color: var(--accent); }
+  .page { display: none; }
+  .page.visible { display: grid; gap: 14px; }
+
+  /* ============ Apontar ============ */
+  .machine-pick { display: grid; gap: 8px; }
+  .machine-pick button {
+    text-align: left; padding: 14px; border-radius: 12px; border: 1px solid var(--ring);
+    background: var(--page); display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  }
+  .machine-pick .nm { font-weight: 700; font-size: 15px; }
+  .machine-pick .rt { font-size: 12px; color: var(--muted); }
+
+  .now-state {
+    border-radius: 14px; padding: 14px 16px; color: var(--btn-ink);
+    display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  }
+  .now-state .lbl { font-size: 14px; font-weight: 700; }
+  .now-state .tm { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .now-state.none { background: var(--track); color: var(--ink-2); }
+
+  .state-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .state-btn {
+    border-radius: 14px; padding: 16px 12px; min-height: 76px;
+    display: grid; gap: 3px; justify-items: center; align-content: center;
+    font-weight: 800; font-size: 15px; color: var(--btn-ink);
+    border: 2px solid transparent;
+  }
+  .state-btn small { font-size: 11px; font-weight: 600; opacity: .92; }
+  .state-btn.prod { background: var(--st-prod); }
+  .state-btn.stop { background: var(--st-stop); }
+  .state-btn.idle { background: var(--st-idle); }
+  .state-btn.wait { background: var(--st-wait); }
+  .state-btn.wait { color: #221a00; }
+  :root[data-theme="dark"] .state-btn.wait, :root:not([data-theme="light"]) .state-btn.wait { color: #fff; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .state-btn.wait { color: #221a00; } }
+  .state-btn.current { border-color: var(--ink); box-shadow: 0 0 0 3px var(--ring); }
+  .state-btn:active { transform: scale(.97); }
+
+  .kpi-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .kpi {
+    background: var(--page); border: 1px solid var(--ring); border-radius: 12px; padding: 10px 12px;
+  }
+  .kpi .k { font-size: 11px; color: var(--muted); font-weight: 600; }
+  .kpi .v { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .kpi .v small { font-size: 12px; font-weight: 600; color: var(--muted); }
+
+  .time-list { display: grid; gap: 8px; }
+  .time-row { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+  .time-row .sw { width: 12px; height: 12px; border-radius: 4px; flex: none; }
+  .time-row .nm { flex: 1; color: var(--ink-2); }
+  .time-row .tv { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  .btn {
+    border-radius: 12px; padding: 14px; font-weight: 800; font-size: 15px;
+    background: var(--accent); color: var(--btn-ink); width: 100%;
+  }
+  .btn.ghost { background: var(--page); color: var(--ink); border: 1px solid var(--ring); }
+  .btn.danger { background: var(--bad); }
+  .btn:active { transform: scale(.98); }
+
+  /* ============ Dashboard ============ */
+  .chips { display: flex; gap: 8px; overflow-x: auto; }
+  .chips button {
+    padding: 7px 14px; border-radius: 999px; border: 1px solid var(--ring);
+    background: var(--surface); font-size: 13px; font-weight: 600; color: var(--ink-2); flex: none;
+  }
+  .chips button.active { background: var(--accent); color: var(--btn-ink); border-color: var(--accent); }
+
+  .gauge-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  .gauge { display: grid; justify-items: center; gap: 4px; }
+  .gauge svg { width: 100%; max-width: 130px; height: auto; }
+  .gauge .glabel { font-size: 12px; font-weight: 700; color: var(--ink-2); }
+  .gauge-hero svg { max-width: 170px; }
+
+  .stackbar { display: flex; height: 26px; border-radius: 8px; overflow: hidden; gap: 2px; background: var(--page); }
+  .stackbar div { min-width: 3px; }
+  .hbars { display: grid; gap: 10px; }
+  .hbar .top { display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 3px; }
+  .hbar .top .n { color: var(--ink-2); font-weight: 600; }
+  .hbar .top .v { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .hbar .track { height: 12px; border-radius: 6px; background: var(--track); overflow: hidden; }
+  .hbar .fill { height: 100%; border-radius: 6px; background: var(--st-stop); min-width: 2px; }
+
+  .mrow {
+    display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--grid);
+  }
+  .mrow:first-of-type { border-top: none; padding-top: 0; }
+  .mrow svg { width: 74px; height: 74px; flex: none; }
+  .mrow .info { flex: 1; min-width: 0; }
+  .mrow .info .nm { font-weight: 700; font-size: 14.5px; }
+  .mrow .info .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .mrow .mini { font-size: 11.5px; color: var(--ink-2); display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .mrow .mini b { font-weight: 700; }
+
+  /* ============ Máquinas / forms ============ */
+  .field { display: grid; gap: 5px; margin-bottom: 12px; }
+  .field label { font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+  .field input, .field select {
+    padding: 12px; border-radius: 10px; border: 1px solid var(--baseline);
+    background: var(--page); width: 100%;
+  }
+  .field input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  .list-row {
+    display: flex; align-items: center; gap: 10px; padding: 12px 0; border-top: 1px solid var(--grid);
+  }
+  .list-row:first-child { border-top: none; }
+  .list-row .info { flex: 1; }
+  .list-row .info .nm { font-weight: 700; }
+  .list-row .info .sub { font-size: 12px; color: var(--muted); }
+  .list-row .act { display: flex; gap: 6px; }
+  .list-row .act button {
+    padding: 8px 10px; border-radius: 9px; border: 1px solid var(--ring); background: var(--page); font-size: 13px;
+  }
+  .tagline { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tagline span {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--ring); background: var(--page);
+    border-radius: 999px; padding: 6px 8px 6px 12px; font-size: 13px;
+  }
+  .tagline span button { color: var(--bad); font-weight: 800; padding: 0 4px; }
+
+  /* ============ Modal / sheet ============ */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 40;
+    display: none; align-items: flex-end; justify-content: center;
+  }
+  .overlay.open { display: flex; }
+  .sheet {
+    background: var(--surface); width: 100%; max-width: 560px;
+    border-radius: 18px 18px 0 0; padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+    display: grid; gap: 10px; max-height: 82vh; overflow-y: auto;
+  }
+  .sheet h3 { font-size: 16px; }
+  .sheet .opt {
+    text-align: left; padding: 14px; border-radius: 12px; border: 1px solid var(--ring);
+    background: var(--page); font-weight: 600; font-size: 15px;
+  }
+  .sheet .opt:active { background: var(--accent-soft); }
+
+  .empty { text-align: center; padding: 26px 10px; color: var(--muted); font-size: 13.5px; line-height: 1.5; }
+  .empty .big { font-size: 34px; margin-bottom: 8px; }
+
+  .diff-pos { color: var(--good); }
+  .diff-neg { color: var(--bad); }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>MES</h1>
+  <span class="wake" id="wakeInd" title="Tela sempre acesa"><span class="dot"></span>tela</span>
+  <button class="icon-btn" id="themeBtn" aria-label="Alternar tema">◐</button>
+  <span class="ver" id="verBadge">v0.0.0</span>
+</header>
+
+<main>
+  <!-- ================= APONTAR ================= -->
+  <section class="page" id="page-apontar"></section>
+
+  <!-- ================= DASHBOARD ================= -->
+  <section class="page" id="page-dash"></section>
+
+  <!-- ================= MÁQUINAS ================= -->
+  <section class="page" id="page-maq"></section>
+</main>
+
+<nav>
+  <button data-tab="apontar" class="active"><span class="ico">⏱</span>Apontar</button>
+  <button data-tab="dash"><span class="ico">◔</span>Dashboard</button>
+  <button data-tab="maq"><span class="ico">⚙</span>Máquinas</button>
+</nav>
+
+<div class="overlay" id="overlay"><div class="sheet" id="sheet"></div></div>
+
+<script>
+/* =====================================================
+   MES — Apontamento de produção, paradas e refugo
+   ===================================================== */
+const APP_VERSION = '1.0.0';   // ⬅ suba a versão a cada atualização
+document.getElementById('verBadge').textContent = 'v' + APP_VERSION;
+
+const STATES = {
+  prod: { label: 'Produzindo',            btn: 'Produção',  sub: 'contagem teórica ativa', color: 'var(--st-prod)', cls: 'prod' },
+  stop: { label: 'Parada',                btn: 'Parada',    sub: 'informar motivo',        color: 'var(--st-stop)', cls: 'stop' },
+  idle: { label: 'Ociosa — sem insumo',   btn: 'Ociosa',    sub: 'sem insumo',             color: 'var(--st-idle)', cls: 'idle' },
+  wait: { label: 'Esperando linha',       btn: 'Esperando', sub: 'máquina da frente',      color: 'var(--st-wait)', cls: 'wait' },
+};
+const STATE_ORDER = ['prod', 'stop', 'idle', 'wait'];
+
+/* ---------- persistência ---------- */
+const KEY = 'mes_v1';
+let db = load();
+function load() {
+  try {
+    const d = JSON.parse(localStorage.getItem(KEY));
+    if (d && d.machines) return d;
+  } catch (e) {}
+  return {
+    machines: [],
+    reasons: ['Manutenção', 'Setup / Troca', 'Ajuste de processo', 'Falta de operador', 'Qualidade', 'Limpeza', 'Outro'],
+    sessions: [],
+    active: null,
+    theme: null,
+    period: '7d',
+  };
+}
+function save() { localStorage.setItem(KEY, JSON.stringify(db)); }
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+/* ---------- tema ---------- */
+function applyTheme() {
+  if (db.theme) document.documentElement.dataset.theme = db.theme;
+  else delete document.documentElement.dataset.theme;
+}
+document.getElementById('themeBtn').onclick = () => {
+  const dark = document.documentElement.dataset.theme === 'dark' ||
+    (!document.documentElement.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches);
+  db.theme = dark ? 'light' : 'dark';
+  save(); applyTheme();
+};
+applyTheme();
+
+/* ---------- wake lock (tela sempre acesa) ---------- */
+let wakeLock = null;
+async function keepAwake() {
+  try {
+    if ('wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      document.getElementById('wakeInd').classList.add('on');
+      wakeLock.addEventListener('release', () => document.getElementById('wakeInd').classList.remove('on'));
+    }
+  } catch (e) { /* precisa de HTTPS + interação em alguns navegadores */ }
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') keepAwake(); });
+window.addEventListener('click', () => { if (!wakeLock || wakeLock.released) keepAwake(); }, { once: false });
+keepAwake();
+
+/* ---------- helpers ---------- */
+const $ = (s, el) => (el || document).querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function fmtDur(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+  return h > 0 ? `${h}:${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}`
+               : `${m}:${String(ss).padStart(2,'0')}`;
+}
+function fmtDurLong(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+  if (h > 0) return `${h}h ${m}min`;
+  if (m > 0) return `${m}min`;
+  return `${s}s`;
+}
+const fmtInt = n => Math.round(n).toLocaleString('pt-BR');
+const pct = (x, dig=1) => (x * 100).toFixed(dig).replace('.', ',') + '%';
+
+/* segmentos de uma sessão (ativa: fecha o atual em "now") */
+function segsOf(sess, now) {
+  const out = sess.segs.map(s => ({ ...s }));
+  if (sess.current) out.push({ state: sess.current.state, reason: sess.current.reason, start: sess.current.start, end: now || Date.now() });
+  return out;
+}
+function totals(sess, now) {
+  const t = { prod: 0, stop: 0, idle: 0, wait: 0, total: 0 };
+  for (const s of segsOf(sess, now)) {
+    const d = Math.max(0, (s.end || now || Date.now()) - s.start);
+    t[s.state] += d; t.total += d;
+  }
+  return t;
+}
+function theoOf(sess, machine, now) {
+  return totals(sess, now).prod / 60000 * (machine ? machine.rate : 0);
+}
+const machineById = id => db.machines.find(m => m.id === id);
+
+/* =====================================================
+   TABS
+   ===================================================== */
+let tab = 'apontar';
+document.querySelectorAll('nav button').forEach(b => {
+  b.onclick = () => {
+    tab = b.dataset.tab;
+    document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x === b));
+    render();
+  };
+});
+function showPage() {
+  for (const p of ['apontar', 'dash', 'maq'])
+    $('#page-' + p).classList.toggle('visible', tab === p);
+}
+
+/* =====================================================
+   APONTAR
+   ===================================================== */
+function renderApontar() {
+  const el = $('#page-apontar');
+  const a = db.active;
+
+  if (!a) {
+    if (db.machines.length === 0) {
+      el.innerHTML = `<div class="card"><div class="empty"><div class="big">⚙</div>
+        Nenhuma máquina cadastrada.<br>Cadastre uma máquina na aba <b>Máquinas</b> para começar a apontar.</div></div>`;
+      return;
+    }
+    el.innerHTML = `<div class="card">
+      <h2>Iniciar apontamento</h2>
+      <p class="hint" style="margin-bottom:12px">Escolha a máquina que você vai acompanhar. O cronômetro começa quando você tocar no primeiro estado.</p>
+      <div class="machine-pick">${db.machines.map(m => `
+        <button data-start="${m.id}">
+          <span><span class="nm">${esc(m.name)}</span><br><span class="rt">${esc(m.sector || '')}</span></span>
+          <span class="rt">${fmtInt(m.rate)} pçs/min ›</span>
+        </button>`).join('')}
+      </div></div>`;
+    el.querySelectorAll('[data-start]').forEach(b => b.onclick = () => startSession(b.dataset.start));
+    return;
+  }
+
+  const m = machineById(a.machineId);
+  const cur = a.current;
+  const curSt = cur ? STATES[cur.state] : null;
+
+  el.innerHTML = `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+        <div><div style="font-weight:800;font-size:17px">${esc(m ? m.name : '?')}</div>
+        <div class="hint">${fmtInt(m ? m.rate : 0)} pçs/min nominal · início ${new Date(a.start).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</div></div>
+        <div style="text-align:right"><div class="hint">tempo total</div>
+        <div style="font-size:22px;font-weight:800;font-variant-numeric:tabular-nums" id="tTotal">0:00</div></div>
+      </div>
+
+      <div class="now-state ${cur ? '' : 'none'}" style="${cur ? 'background:' + curSt.color : ''}">
+        <span class="lbl">${cur ? esc(curSt.label + (cur.reason ? ' — ' + cur.reason : '')) : 'Toque em um estado para começar'}</span>
+        <span class="tm" id="tState">${cur ? '' : '—'}</span>
+      </div>
+
+      <div style="height:12px"></div>
+      <div class="state-grid">
+        ${STATE_ORDER.map(k => `
+          <button class="state-btn ${STATES[k].cls} ${cur && cur.state === k ? 'current' : ''}" data-state="${k}">
+            ${STATES[k].btn}<small>${STATES[k].sub}</small>
+          </button>`).join('')}
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Produção</h2>
+      <div class="kpi-row">
+        <div class="kpi"><div class="k">Contagem teórica</div><div class="v" id="theoV">0 <small>pçs</small></div></div>
+        <div class="kpi"><div class="k">Ritmo nominal</div><div class="v">${fmtInt(m ? m.rate : 0)} <small>pçs/min</small></div></div>
+      </div>
+      <p class="hint" style="margin-top:10px">A contagem teórica sobe apenas enquanto o estado é <b>Produção</b>. Ao finalizar, informe a produção real e o refugo para ver a diferença.</p>
+    </div>
+
+    <div class="card">
+      <h2>Tempos acumulados</h2>
+      <div class="time-list" id="timeList"></div>
+    </div>
+
+    <div style="display:grid;gap:10px">
+      <button class="btn" id="finishBtn">✓ Finalizar e apontar produção real</button>
+      <button class="btn ghost" id="cancelBtn">Descartar apontamento</button>
+    </div>`;
+
+  el.querySelectorAll('[data-state]').forEach(b => {
+    b.onclick = () => {
+      const k = b.dataset.state;
+      if (k === 'stop') openReasonSheet();
+      else setState(k);
+    };
+  });
+  $('#finishBtn').onclick = openFinishSheet;
+  $('#cancelBtn').onclick = () => {
+    openSheet(`<h3>Descartar apontamento?</h3>
+      <p class="hint">Todos os tempos desta medição serão perdidos.</p>
+      <button class="btn danger" id="cfDel">Sim, descartar</button>
+      <button class="btn ghost" id="cfNo">Voltar</button>`);
+    $('#cfDel').onclick = () => { db.active = null; save(); closeSheet(); render(); };
+    $('#cfNo').onclick = closeSheet;
+  };
+  tick();
+}
+
+function startSession(machineId) {
+  db.active = { id: uid(), machineId, start: Date.now(), segs: [], current: null };
+  save(); render();
+}
+
+/* trocar de estado: fecha o segmento atual (qualquer categoria interrompe a produção) */
+function setState(state, reason) {
+  const a = db.active; if (!a) return;
+  const now = Date.now();
+  if (a.current) {
+    if (a.current.state === state && (a.current.reason || null) === (reason || null)) return;
+    a.segs.push({ state: a.current.state, reason: a.current.reason || null, start: a.current.start, end: now });
+  }
+  a.current = { state, reason: reason || null, start: now };
+  save(); render();
+}
+
+function openReasonSheet() {
+  openSheet(`<h3>Motivo da parada</h3>
+    ${db.reasons.map((r, i) => `<button class="opt" data-r="${i}">${esc(r)}</button>`).join('')}
+    <button class="btn ghost" id="rCancel">Cancelar</button>`);
+  $('#sheet').querySelectorAll('[data-r]').forEach(b => b.onclick = () => {
+    setState('stop', db.reasons[+b.dataset.r]); closeSheet();
+  });
+  $('#rCancel').onclick = closeSheet;
+}
+
+function openFinishSheet() {
+  const a = db.active; if (!a) return;
+  const m = machineById(a.machineId);
+  const theo = theoOf(a, m);
+  openSheet(`<h3>Finalizar apontamento — ${esc(m ? m.name : '')}</h3>
+    <div class="kpi"><div class="k">Produção teórica (${fmtDurLong(totals(a).prod)} produzindo)</div>
+      <div class="v">${fmtInt(theo)} <small>pçs</small></div></div>
+    <div class="field"><label for="fReal">Produção real (peças contadas)</label>
+      <input id="fReal" type="number" inputmode="numeric" min="0" placeholder="0"></div>
+    <div class="field"><label for="fScrap">Refugo (peças ruins, dentro do total real)</label>
+      <input id="fScrap" type="number" inputmode="numeric" min="0" value="0"></div>
+    <div class="hint" id="fPreview"></div>
+    <button class="btn" id="fSave">Salvar apontamento</button>
+    <button class="btn ghost" id="fBack">Voltar</button>`);
+  const upd = () => {
+    const real = +$('#fReal').value || 0;
+    const diff = real - theo;
+    $('#fPreview').innerHTML = real > 0
+      ? `Diferença real − teórica: <b class="${diff >= 0 ? 'diff-pos' : 'diff-neg'}">${diff >= 0 ? '+' : ''}${fmtInt(diff)} pçs (${pct(theo > 0 ? real / theo : 0)} do teórico)</b>`
+      : '';
+  };
+  $('#fReal').oninput = upd;
+  $('#fBack').onclick = closeSheet;
+  $('#fSave').onclick = () => {
+    const real = Math.max(0, +$('#fReal').value || 0);
+    const scrap = Math.min(real, Math.max(0, +$('#fScrap').value || 0));
+    const now = Date.now();
+    const segs = segsOf(a, now);
+    db.sessions.push({
+      id: a.id, machineId: a.machineId, start: a.start, end: now,
+      segs, theo: theoOf(a, m, now), real, scrap,
+    });
+    db.active = null; save(); closeSheet();
+    tab = 'dash';
+    document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x.dataset.tab === 'dash'));
+    render();
+  };
+}
+
+/* ---------- tick de 1s: cronômetros ao vivo ---------- */
+setInterval(tick, 1000);
+function tick() {
+  const a = db.active;
+  if (!a || tab !== 'apontar') return;
+  const m = machineById(a.machineId);
+  const t = totals(a);
+  const elT = $('#tTotal'); if (elT) elT.textContent = fmtDur(t.total);
+  const elS = $('#tState');
+  if (elS && a.current) elS.textContent = fmtDur(Date.now() - a.current.start);
+  const elTh = $('#theoV'); if (elTh) elTh.innerHTML = fmtInt(theoOf(a, m)) + ' <small>pçs</small>';
+  const list = $('#timeList');
+  if (list) list.innerHTML = STATE_ORDER.map(k => `
+    <div class="time-row"><span class="sw" style="background:${STATES[k].color}"></span>
+      <span class="nm">${STATES[k].label}</span><span class="tv">${fmtDur(t[k])}</span></div>`).join('') +
+    `<div class="time-row" style="border-top:1px solid var(--grid);padding-top:8px">
+      <span class="sw" style="background:transparent"></span><span class="nm"><b>Total</b></span><span class="tv">${fmtDur(t.total)}</span></div>`;
+}
+
+/* =====================================================
+   DASHBOARD
+   ===================================================== */
+const PERIODS = { hoje: ['Hoje', 0], '7d': ['7 dias', 7], '30d': ['30 dias', 30], tudo: ['Tudo', null] };
+
+function periodStart(key) {
+  const d = new Date(); d.setHours(0, 0, 0, 0);
+  const days = PERIODS[key][1];
+  if (days === null) return 0;
+  if (days === 0) return d.getTime();
+  return d.getTime() - (days - 1) * 86400000;
+}
+
+function donutSVG(value, label, sub, size) {
+  const r = 42, c = 2 * Math.PI * r;
+  const v = Math.max(0, Math.min(1, value || 0));
+  const shown = value == null ? '—' : (value * 100).toFixed(value >= 1 ? 0 : 1).replace('.', ',') + '%';
+  return `<svg viewBox="0 0 100 100" role="img" aria-label="${esc(label)}: ${shown}">
+    <circle cx="50" cy="50" r="${r}" fill="none" stroke="var(--track)" stroke-width="10"/>
+    <circle cx="50" cy="50" r="${r}" fill="none" stroke="var(--accent)" stroke-width="10"
+      stroke-linecap="round" stroke-dasharray="${(v * c).toFixed(1)} ${c.toFixed(1)}"
+      transform="rotate(-90 50 50)"/>
+    <text x="50" y="${sub ? 47 : 50}" text-anchor="middle" dominant-baseline="middle"
+      font-size="${shown.length > 5 ? 17 : 20}" font-weight="800" fill="var(--ink)">${shown}</text>
+    ${sub ? `<text x="50" y="64" text-anchor="middle" font-size="10" font-weight="600" fill="var(--muted)">${esc(sub)}</text>` : ''}
+  </svg>`;
+}
+
+function aggregate(sessions) {
+  const agg = { t: { prod: 0, stop: 0, idle: 0, wait: 0, total: 0 }, theo: 0, real: 0, scrap: 0, reasons: {}, nFinished: 0 };
+  for (const s of sessions) {
+    const t = totals(s);
+    for (const k of ['prod','stop','idle','wait','total']) agg.t[k] += t[k];
+    agg.theo += s.theo || theoOf(s, machineById(s.machineId));
+    if (s.end !== undefined && s.real !== undefined) { agg.real += s.real; agg.scrap += s.scrap || 0; agg.nFinished++; }
+    for (const seg of segsOf(s)) {
+      if (seg.state === 'stop') {
+        const r = seg.reason || 'Sem motivo';
+        agg.reasons[r] = (agg.reasons[r] || 0) + ((seg.end || Date.now()) - seg.start);
+      }
+    }
+  }
+  return agg;
+}
+function oeeOf(agg) {
+  const A = agg.t.total > 0 ? agg.t.prod / agg.t.total : null;
+  const P = agg.nFinished > 0 && agg.theo > 0 ? agg.real / agg.theo : null;
+  const Q = agg.nFinished > 0 && agg.real > 0 ? (agg.real - agg.scrap) / agg.real : null;
+  const oee = (A !== null && P !== null && Q !== null) ? A * P * Q : null;
+  return { A, P, Q, oee };
+}
+
+function renderDash() {
+  const el = $('#page-dash');
+  const from = periodStart(db.period);
+  const done = db.sessions.filter(s => s.end >= from);
+  const all = db.active ? [...done, db.active] : done;
+
+  const chips = `<div class="chips">${Object.keys(PERIODS).map(k =>
+    `<button class="${db.period === k ? 'active' : ''}" data-p="${k}">${PERIODS[k][0]}</button>`).join('')}</div>`;
+
+  if (all.length === 0) {
+    el.innerHTML = chips + `<div class="card"><div class="empty"><div class="big">◔</div>
+      Sem apontamentos no período.<br>Faça uma medição na aba <b>Apontar</b>.</div></div>`;
+    bindChips(el); return;
+  }
+
+  const agg = aggregate(all);
+  const { A, P, Q, oee } = oeeOf(agg);
+
+  /* barra empilhada de tempos */
+  const tt = agg.t.total || 1;
+  const stack = STATE_ORDER.map(k =>
+    `<div style="flex:${Math.max(agg.t[k] / tt, 0)};background:${STATES[k].color}" title="${STATES[k].label}: ${fmtDurLong(agg.t[k])}"></div>`).join('');
+  const legend = STATE_ORDER.map(k => `
+    <div class="time-row"><span class="sw" style="background:${STATES[k].color}"></span>
+      <span class="nm">${STATES[k].label}</span>
+      <span class="tv">${fmtDurLong(agg.t[k])} · ${pct(agg.t[k] / tt, 0)}</span></div>`).join('');
+
+  /* paradas por motivo (barras ordenadas, % acumulado como rótulo) */
+  const reasons = Object.entries(agg.reasons).sort((a, b) => b[1] - a[1]);
+  const stopTotal = reasons.reduce((s, r) => s + r[1], 0) || 1;
+  let cum = 0;
+  const bars = reasons.map(([r, ms]) => {
+    cum += ms;
+    return `<div class="hbar">
+      <div class="top"><span class="n">${esc(r)}</span>
+        <span class="v">${fmtDurLong(ms)} · ${pct(ms / stopTotal, 0)} <span style="color:var(--muted)">(acum. ${pct(cum / stopTotal, 0)})</span></span></div>
+      <div class="track"><div class="fill" style="width:${(ms / reasons[0][1] * 100).toFixed(1)}%"></div></div>
+    </div>`;
+  }).join('');
+
+  /* por máquina */
+  const machines = db.machines.filter(m => all.some(s => s.machineId === m.id));
+  const perMachine = machines.map(m => {
+    const ms = all.filter(s => s.machineId === m.id);
+    const ag = aggregate(ms);
+    const o = oeeOf(ag);
+    const live = db.active && db.active.machineId === m.id;
+    return `<div class="mrow">
+      ${donutSVG(o.oee !== null ? o.oee : o.A, 'OEE ' + m.name, o.oee !== null ? 'OEE' : 'DISP')}
+      <div class="info">
+        <div class="nm">${esc(m.name)}${live ? ' <span style="color:var(--good);font-size:11px">● ao vivo</span>' : ''}</div>
+        <div class="sub">${esc(m.sector || '')} · ${fmtInt(ag.real)} pçs reais · ${fmtInt(ag.scrap)} refugo</div>
+        <div class="mini">
+          <span>Produzindo <b>${fmtDurLong(ag.t.prod)}</b></span><span>Parada <b>${fmtDurLong(ag.t.stop)}</b></span>
+          <span>Ociosa <b>${fmtDurLong(ag.t.idle)}</b></span><span>Esperando <b>${fmtDurLong(ag.t.wait)}</b></span>
+        </div>
+      </div></div>`;
+  }).join('');
+
+  const prodCard = agg.nFinished > 0 ? `
+    <div class="card"><h2>Produção do período</h2>
+      <div class="kpi-row">
+        <div class="kpi"><div class="k">Teórica</div><div class="v">${fmtInt(agg.theo)} <small>pçs</small></div></div>
+        <div class="kpi"><div class="k">Real</div><div class="v">${fmtInt(agg.real)} <small>pçs</small></div></div>
+        <div class="kpi"><div class="k">Diferença</div><div class="v ${agg.real - agg.theo >= 0 ? 'diff-pos' : 'diff-neg'}">${agg.real - agg.theo >= 0 ? '+' : ''}${fmtInt(agg.real - agg.theo)}</div></div>
+        <div class="kpi"><div class="k">Refugo</div><div class="v">${fmtInt(agg.scrap)} <small>pçs</small></div></div>
+      </div></div>` : '';
+
+  el.innerHTML = chips + `
+    <div class="card">
+      <h2>Visão geral · ${PERIODS[db.period][0].toLowerCase()}</h2>
+      <div class="gauge-grid">
+        <div class="gauge gauge-hero" style="grid-column:1/-1">${donutSVG(oee, 'OEE', 'OEE')}
+          <span class="glabel">OEE ${oee === null ? '(finalize um apontamento p/ calcular)' : ''}</span></div>
+        <div class="gauge">${donutSVG(A, 'Disponibilidade')}<span class="glabel">Disponibilidade</span></div>
+        <div class="gauge">${donutSVG(P, 'Performance')}<span class="glabel">Performance</span></div>
+        <div class="gauge" style="grid-column:1/-1;max-width:50%;justify-self:center">${donutSVG(Q, 'Qualidade')}<span class="glabel">Qualidade</span></div>
+      </div>
+    </div>
+    ${prodCard}
+    <div class="card">
+      <h2>Distribuição do tempo</h2>
+      <div class="stackbar">${stack}</div>
+      <div style="height:12px"></div>
+      <div class="time-list">${legend}
+        <div class="time-row" style="border-top:1px solid var(--grid);padding-top:8px">
+          <span class="sw" style="background:transparent"></span><span class="nm"><b>Total medido</b></span><span class="tv">${fmtDurLong(agg.t.total)}</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Paradas — principais motivos</h2>
+      ${reasons.length ? `<div class="hbars">${bars}</div>` : '<p class="hint">Nenhuma parada apontada no período. 🎉</p>'}
+    </div>
+    <div class="card">
+      <h2>Por máquina</h2>
+      ${perMachine || '<p class="hint">Sem dados por máquina.</p>'}
+    </div>
+    <div class="card">
+      <h2>Apontamentos (${done.length})</h2>
+      ${done.slice().reverse().slice(0, 20).map(s => {
+        const m = machineById(s.machineId); const t = totals(s);
+        return `<div class="list-row"><div class="info">
+          <div class="nm">${esc(m ? m.name : '?')} — ${fmtInt(s.real)} pçs <span style="color:var(--muted);font-weight:400">(teo ${fmtInt(s.theo)})</span></div>
+          <div class="sub">${new Date(s.start).toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} · ${fmtDurLong(t.total)} · refugo ${fmtInt(s.scrap)}</div>
+        </div><div class="act"><button data-del-sess="${s.id}">✕</button></div></div>`;
+      }).join('') || '<p class="hint">Nenhum apontamento finalizado.</p>'}
+    </div>`;
+
+  bindChips(el);
+  el.querySelectorAll('[data-del-sess]').forEach(b => b.onclick = () => {
+    openSheet(`<h3>Excluir este apontamento?</h3>
+      <button class="btn danger" id="dsY">Sim, excluir</button><button class="btn ghost" id="dsN">Voltar</button>`);
+    $('#dsY').onclick = () => { db.sessions = db.sessions.filter(s => s.id !== b.dataset.delSess); save(); closeSheet(); render(); };
+    $('#dsN').onclick = closeSheet;
+  });
+}
+function bindChips(el) {
+  el.querySelectorAll('[data-p]').forEach(b => b.onclick = () => { db.period = b.dataset.p; save(); render(); });
+}
+
+/* =====================================================
+   MÁQUINAS
+   ===================================================== */
+let editingId = null;
+function renderMaq() {
+  const el = $('#page-maq');
+  const editing = editingId ? machineById(editingId) : null;
+  el.innerHTML = `
+    <div class="card">
+      <h2>${editing ? 'Editar máquina' : 'Cadastrar máquina'}</h2>
+      <div class="field"><label for="mNome">Nome da máquina</label>
+        <input id="mNome" placeholder="Ex.: Extrusora 01" value="${editing ? esc(editing.name) : ''}"></div>
+      <div class="field"><label for="mSetor">Setor / grupo (opcional)</label>
+        <input id="mSetor" placeholder="Ex.: Extrusão" value="${editing ? esc(editing.sector || '') : ''}"></div>
+      <div class="field"><label for="mTaxa">Capacidade nominal (peças por minuto)</label>
+        <input id="mTaxa" type="number" inputmode="decimal" min="0.01" step="any" placeholder="Ex.: 100" value="${editing ? editing.rate : ''}"></div>
+      <button class="btn" id="mSave">${editing ? 'Salvar alterações' : '+ Cadastrar máquina'}</button>
+      ${editing ? '<div style="height:8px"></div><button class="btn ghost" id="mCancelEdit">Cancelar edição</button>' : ''}
+    </div>
+
+    <div class="card">
+      <h2>Máquinas cadastradas (${db.machines.length})</h2>
+      ${db.machines.map(m => `
+        <div class="list-row">
+          <div class="info"><div class="nm">${esc(m.name)}</div>
+            <div class="sub">${esc(m.sector || 'sem setor')} · ${fmtInt(m.rate)} pçs/min</div></div>
+          <div class="act">
+            <button data-edit="${m.id}">✎</button>
+            <button data-del="${m.id}" style="color:var(--bad)">✕</button>
+          </div>
+        </div>`).join('') || '<p class="hint">Nenhuma máquina ainda.</p>'}
+    </div>
+
+    <div class="card">
+      <h2>Motivos de parada</h2>
+      <div class="tagline">${db.reasons.map((r, i) =>
+        `<span>${esc(r)}<button data-delr="${i}" aria-label="remover">✕</button></span>`).join('')}</div>
+      <div style="height:12px"></div>
+      <div class="field" style="margin:0"><label class="sr" for="rNew">Novo motivo</label>
+        <div style="display:flex;gap:8px">
+          <input id="rNew" placeholder="Novo motivo…" style="flex:1;padding:12px;border-radius:10px;border:1px solid var(--baseline);background:var(--page)">
+          <button class="btn" id="rAdd" style="width:auto;padding:12px 16px">+</button>
+        </div></div>
+    </div>
+
+    <div class="card">
+      <h2>Sobre</h2>
+      <p class="hint">MES de apontamento manual — versão <b>v${APP_VERSION}</b>. Os dados ficam salvos neste aparelho (localStorage). A tela permanece acesa enquanto o app estiver aberto (indicador “tela” no topo).</p>
+    </div>`;
+
+  $('#mSave').onclick = () => {
+    const name = $('#mNome').value.trim();
+    const rate = parseFloat($('#mTaxa').value);
+    if (!name) { $('#mNome').focus(); return; }
+    if (!(rate > 0)) { $('#mTaxa').focus(); return; }
+    if (editing) { editing.name = name; editing.sector = $('#mSetor').value.trim(); editing.rate = rate; editingId = null; }
+    else db.machines.push({ id: uid(), name, sector: $('#mSetor').value.trim(), rate });
+    save(); render();
+  };
+  if (editing) $('#mCancelEdit').onclick = () => { editingId = null; render(); };
+  el.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => { editingId = b.dataset.edit; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+  el.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+    const m = machineById(b.dataset.del);
+    openSheet(`<h3>Excluir “${esc(m.name)}”?</h3>
+      <p class="hint">Os apontamentos já feitos desta máquina continuam no histórico.</p>
+      <button class="btn danger" id="dmY">Sim, excluir</button><button class="btn ghost" id="dmN">Voltar</button>`);
+    $('#dmY').onclick = () => {
+      if (db.active && db.active.machineId === b.dataset.del) db.active = null;
+      db.machines = db.machines.filter(x => x.id !== b.dataset.del);
+      if (editingId === b.dataset.del) editingId = null;
+      save(); closeSheet(); render();
+    };
+    $('#dmN').onclick = closeSheet;
+  });
+  el.querySelectorAll('[data-delr]').forEach(b => b.onclick = () => { db.reasons.splice(+b.dataset.delr, 1); save(); render(); });
+  $('#rAdd').onclick = () => {
+    const v = $('#rNew').value.trim();
+    if (v && !db.reasons.includes(v)) { db.reasons.push(v); save(); render(); }
+  };
+}
+
+/* =====================================================
+   Sheet / overlay
+   ===================================================== */
+function openSheet(html) {
+  $('#sheet').innerHTML = html;
+  $('#overlay').classList.add('open');
+}
+function closeSheet() { $('#overlay').classList.remove('open'); }
+$('#overlay').addEventListener('click', e => { if (e.target === e.currentTarget) closeSheet(); });
+
+/* =====================================================
+   Render raiz
+   ===================================================== */
+function render() {
+  showPage();
+  if (tab === 'apontar') renderApontar();
+  if (tab === 'dash') renderDash();
+  if (tab === 'maq') renderMaq();
+}
+render();
+</script>
+</body>
+</html>

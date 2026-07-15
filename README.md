@@ -1,0 +1,58 @@
+# MES — Apontamento de Produção
+
+App web simples (um único `index.html`, sem dependências) para fazer apontamentos
+manuais ao lado da máquina: **produção, paradas, ociosidade, espera e refugo** —
+com dashboard de OEE, gauges e ranking de paradas.
+
+## Como usar
+
+Abra o `index.html` no navegador do celular. Para ter HTTPS (necessário para a
+tela ficar sempre acesa / Wake Lock) e instalar como app, publique via **GitHub
+Pages**: Settings → Pages → branch `main` → `/ (root)`.
+
+### Fluxo de uma medição
+
+1. **Máquinas** → cadastre a máquina (nome, setor e capacidade nominal em
+   peças/minuto — ex.: 100 pçs/min).
+2. **Apontar** → escolha a máquina e toque no estado atual:
+   - ▸ **Produção** — a contagem teórica sobe (capacidade × tempo produzindo);
+   - ▸ **Parada** — escolhe o motivo (a lista de motivos é editável);
+   - ▸ **Ociosa** — sem insumo;
+   - ▸ **Esperando** — aguardando a máquina da frente puxar.
+
+   Tocar em qualquer estado **encerra o anterior** — apontar uma parada sempre
+   interrompe a produção. Os 4 cronômetros acumulam em tempo real.
+3. **Finalizar** → informe a **produção real** contada e o **refugo**. O app
+   mostra a diferença real × teórica e salva o apontamento.
+4. **Dashboard** → OEE, Disponibilidade, Performance e Qualidade em gauges,
+   distribuição do tempo, principais motivos de parada e resumo por máquina,
+   com filtro de período (hoje / 7 / 30 dias / tudo).
+
+## Cálculos
+
+| Métrica | Fórmula |
+|---|---|
+| Contagem teórica | capacidade (pçs/min) × tempo em Produção |
+| Disponibilidade | tempo produzindo ÷ tempo total medido |
+| Performance | produção real ÷ produção teórica |
+| Qualidade | (real − refugo) ÷ real |
+| OEE | Disponibilidade × Performance × Qualidade |
+
+## Recursos
+
+- **Tema claro e escuro** (botão ◐ no topo; segue o sistema por padrão).
+- **Versão no topo direito** — constante `APP_VERSION` no início do
+  `<script>` do `index.html`. **Suba o número a cada atualização.**
+- **Tela sempre acesa** enquanto o app está aberto (Wake Lock API; requer
+  HTTPS — o indicador “tela” fica verde quando ativo).
+- **Dados no aparelho** — tudo fica em `localStorage`; funciona offline após
+  o primeiro carregamento. Um apontamento em andamento sobrevive a recarregar
+  a página (os tempos são derivados de timestamps).
+- **Instalável** — `manifest.json` permite “Adicionar à tela inicial”.
+
+## Estrutura
+
+```
+index.html     app completo (HTML + CSS + JS)
+manifest.json  metadados PWA (instalar na tela inicial)
+```
