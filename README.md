@@ -12,11 +12,15 @@ Pages**: Settings → Pages → branch `main` → `/ (root)`.
 
 ### Fluxo de uma medição
 
-1. **Máquinas** → cadastre a máquina (nome, setor e capacidade nominal em
-   peças/minuto — ex.: 100 pçs/min).
+1. **Máquinas** → cadastre a máquina (nome, setor, capacidade nominal em
+   peças/minuto — ex.: 100 pçs/min — e **meta de OEE em %**).
 2. **Apontar** → escolha a máquina e toque no estado atual:
    - ▸ **Produção** — a contagem teórica sobe (capacidade × tempo produzindo);
-   - ▸ **Parada** — escolhe o motivo (a lista de motivos é editável);
+   - ▸ **Parada** — escolhe o motivo (lista editável) e o **tipo**:
+     **Falha** (sensor, alarme, travamento, automação), **Quebra** (dano
+     físico, troca de peça) ou **Operacional** (setup, limpeza…). Em falhas e
+     quebras, toque em **“Manutenção chegou”** quando o técnico chegar — isso
+     alimenta MTTA e MTTR;
    - ▸ **Ociosa** — sem insumo;
    - ▸ **Esperando** — aguardando a máquina da frente puxar.
 
@@ -24,19 +28,28 @@ Pages**: Settings → Pages → branch `main` → `/ (root)`.
    interrompe a produção. Os 4 cronômetros acumulam em tempo real.
 3. **Finalizar** → informe a **produção real** contada e o **refugo**. O app
    mostra a diferença real × teórica e salva o apontamento.
-4. **Dashboard** → OEE, Disponibilidade, Performance e Qualidade em gauges,
-   distribuição do tempo, principais motivos de parada e resumo por máquina,
-   com filtro de período (hoje / 7 / 30 dias / tudo).
+4. **Dashboard** → OEE (gauge **verde se ≥ meta, vermelho se abaixo**),
+   Disponibilidade, Performance e Qualidade lado a lado, indicadores de
+   manutenção (MTBF, MTBB, MTTA, MTTR), distribuição do tempo, principais
+   motivos de parada e resumo por máquina, com filtro de período
+   (hoje / 7 / 30 dias / tudo).
 
 ## Cálculos
 
-| Métrica | Fórmula |
-|---|---|
-| Contagem teórica | capacidade (pçs/min) × tempo em Produção |
-| Disponibilidade | tempo produzindo ÷ tempo total medido |
-| Performance | produção real ÷ produção teórica |
-| Qualidade | (real − refugo) ÷ real |
-| OEE | Disponibilidade × Performance × Qualidade |
+| Métrica | Fórmula | Objetivo |
+|---|---|---|
+| Contagem teórica | capacidade (pçs/min) × tempo em Produção | — |
+| Disponibilidade | tempo produzindo ÷ tempo total medido | ↑ |
+| Performance | produção real ÷ produção teórica | ↑ |
+| Qualidade | (real − refugo) ÷ real | ↑ |
+| OEE | Disponibilidade × Performance × Qualidade | ≥ meta |
+| MTBF | tempo produzindo ÷ nº de falhas (falhas + quebras) | ↑ |
+| MTBB | tempo produzindo ÷ nº de quebras (dano físico) | ↑ |
+| MTTA | média (chegada da manutenção − início da parada) | ↓ |
+| MTTR | média (liberação − chegada da manutenção) | ↓ |
+
+Sem o toque em “Manutenção chegou”, a parada inteira conta como reparo
+(MTTR) e não entra no MTTA.
 
 ## Recursos
 

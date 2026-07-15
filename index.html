@@ -62,11 +62,12 @@
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-  html, body { height: 100%; }
+  html { height: 100%; }
   body {
+    min-height: 100%;
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     background: var(--page); color: var(--ink);
-    padding-bottom: calc(64px + env(safe-area-inset-bottom));
+    padding-bottom: calc(92px + env(safe-area-inset-bottom));
     max-width: 560px; margin: 0 auto;
   }
   button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
@@ -181,11 +182,14 @@
   }
   .chips button.active { background: var(--accent); color: var(--btn-ink); border-color: var(--accent); }
 
-  .gauge-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-  .gauge { display: grid; justify-items: center; gap: 4px; }
-  .gauge svg { width: 100%; max-width: 130px; height: auto; }
-  .gauge .glabel { font-size: 12px; font-weight: 700; color: var(--ink-2); }
-  .gauge-hero svg { max-width: 170px; }
+  .gauge-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .gauge { display: grid; justify-items: center; gap: 4px; min-width: 0; }
+  .gauge svg { width: 100%; max-width: 104px; height: auto; }
+  .gauge .glabel { font-size: 11px; font-weight: 700; color: var(--ink-2); text-align: center; }
+  .gauge-hero { grid-column: 1 / -1; }
+  .gauge-hero svg { max-width: 172px; }
+  .gauge-hero .glabel { font-size: 12.5px; }
+  .gauge .gmeta { font-size: 11px; color: var(--muted); }
 
   .stackbar { display: flex; height: 26px; border-radius: 8px; overflow: hidden; gap: 2px; background: var(--page); }
   .stackbar div { min-width: 3px; }
@@ -292,7 +296,7 @@
 /* =====================================================
    MES — Apontamento de produção, paradas e refugo
    ===================================================== */
-const APP_VERSION = '1.0.0';   // ⬅ suba a versão a cada atualização
+const APP_VERSION = '1.1.0';   // ⬅ suba a versão a cada atualização
 document.getElementById('verBadge').textContent = 'v' + APP_VERSION;
 
 const STATES = {
@@ -302,6 +306,13 @@ const STATES = {
   wait: { label: 'Esperando linha',       btn: 'Esperando', sub: 'máquina da frente',      color: 'var(--st-wait)', cls: 'wait' },
 };
 const STATE_ORDER = ['prod', 'stop', 'idle', 'wait'];
+/* classificação da parada — alimenta MTBF / MTBB / MTTA / MTTR */
+const STOP_KINDS = {
+  fail:  { label: 'Falha',       hint: 'sensor, alarme, travamento, erro de automação' },
+  break: { label: 'Quebra',      hint: 'dano físico — exige reparo ou troca de peça' },
+  op:    { label: 'Operacional', hint: 'setup, limpeza, falta de operador…' },
+};
+const DEFAULT_OEE_TARGET = 85; /* % */
 
 /* ---------- persistência ---------- */
 const KEY = 'mes_v1';
@@ -373,7 +384,7 @@ const pct = (x, dig=1) => (x * 100).toFixed(dig).replace('.', ',') + '%';
 /* segmentos de uma sessão (ativa: fecha o atual em "now") */
 function segsOf(sess, now) {
   const out = sess.segs.map(s => ({ ...s }));
-  if (sess.current) out.push({ state: sess.current.state, reason: sess.current.reason, start: sess.current.start, end: now || Date.now() });
+  if (sess.current) out.push({ ...sess.current, end: now || Date.now() });
   return out;
 }
 function totals(sess, now) {
@@ -445,9 +456,15 @@ function renderApontar() {
       </div>
 
       <div class="now-state ${cur ? '' : 'none'}" style="${cur ? 'background:' + curSt.color : ''}">
-        <span class="lbl">${cur ? esc(curSt.label + (cur.reason ? ' — ' + cur.reason : '')) : 'Toque em um estado para começar'}</span>
+        <span class="lbl">${cur ? esc(curSt.label + (cur.reason ? ' — ' + cur.reason : '') + (cur.kind ? ' · ' + STOP_KINDS[cur.kind].label : '')) : 'Toque em um estado para começar'}</span>
         <span class="tm" id="tState">${cur ? '' : '—'}</span>
       </div>
+
+      ${cur && cur.state === 'stop' && cur.kind && cur.kind !== 'op' ? (
+        cur.maintAt
+          ? `<p class="hint" style="margin-top:8px">🔧 Manutenção chegou às ${new Date(cur.maintAt).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'})} (atendimento em ${fmtDurLong(cur.maintAt - cur.start)}) — em reparo.</p>`
+          : `<div style="height:10px"></div><button class="btn ghost" id="maintBtn">🔧 Manutenção chegou (marca o MTTA)</button>`
+      ) : ''}
 
       <div style="height:12px"></div>
       <div class="state-grid">
@@ -484,6 +501,7 @@ function renderApontar() {
       else setState(k);
     };
   });
+  const mb = $('#maintBtn'); if (mb) mb.onclick = markMaintArrived;
   $('#finishBtn').onclick = openFinishSheet;
   $('#cancelBtn').onclick = () => {
     openSheet(`<h3>Descartar apontamento?</h3>
@@ -502,14 +520,14 @@ function startSession(machineId) {
 }
 
 /* trocar de estado: fecha o segmento atual (qualquer categoria interrompe a produção) */
-function setState(state, reason) {
+function setState(state, reason, kind) {
   const a = db.active; if (!a) return;
   const now = Date.now();
   if (a.current) {
     if (a.current.state === state && (a.current.reason || null) === (reason || null)) return;
-    a.segs.push({ state: a.current.state, reason: a.current.reason || null, start: a.current.start, end: now });
+    a.segs.push({ ...a.current, end: now });
   }
-  a.current = { state, reason: reason || null, start: now };
+  a.current = { state, reason: reason || null, kind: kind || null, start: now };
   save(); render();
 }
 
@@ -517,10 +535,29 @@ function openReasonSheet() {
   openSheet(`<h3>Motivo da parada</h3>
     ${db.reasons.map((r, i) => `<button class="opt" data-r="${i}">${esc(r)}</button>`).join('')}
     <button class="btn ghost" id="rCancel">Cancelar</button>`);
-  $('#sheet').querySelectorAll('[data-r]').forEach(b => b.onclick = () => {
-    setState('stop', db.reasons[+b.dataset.r]); closeSheet();
-  });
+  $('#sheet').querySelectorAll('[data-r]').forEach(b => b.onclick = () => openKindSheet(db.reasons[+b.dataset.r]));
   $('#rCancel').onclick = closeSheet;
+}
+
+function openKindSheet(reason) {
+  openSheet(`<h3>Tipo da parada — ${esc(reason)}</h3>
+    <p class="hint">A classificação alimenta os indicadores MTBF, MTBB, MTTA e MTTR.</p>
+    ${Object.entries(STOP_KINDS).map(([k, v]) =>
+      `<button class="opt" data-k="${k}"><b>${v.label}</b><br><span class="hint">${v.hint}</span></button>`).join('')}
+    <button class="btn ghost" id="kCancel">Cancelar</button>`);
+  $('#sheet').querySelectorAll('[data-k]').forEach(b => b.onclick = () => {
+    setState('stop', reason, b.dataset.k); closeSheet();
+  });
+  $('#kCancel').onclick = closeSheet;
+}
+
+/* registrar chegada da manutenção na parada atual (MTTA / MTTR) */
+function markMaintArrived() {
+  const a = db.active;
+  if (a && a.current && a.current.state === 'stop' && !a.current.maintAt) {
+    a.current.maintAt = Date.now();
+    save(); render();
+  }
 }
 
 function openFinishSheet() {
@@ -594,13 +631,13 @@ function periodStart(key) {
   return d.getTime() - (days - 1) * 86400000;
 }
 
-function donutSVG(value, label, sub, size) {
+function donutSVG(value, label, sub, color) {
   const r = 42, c = 2 * Math.PI * r;
   const v = Math.max(0, Math.min(1, value || 0));
   const shown = value == null ? '—' : (value * 100).toFixed(value >= 1 ? 0 : 1).replace('.', ',') + '%';
   return `<svg viewBox="0 0 100 100" role="img" aria-label="${esc(label)}: ${shown}">
     <circle cx="50" cy="50" r="${r}" fill="none" stroke="var(--track)" stroke-width="10"/>
-    <circle cx="50" cy="50" r="${r}" fill="none" stroke="var(--accent)" stroke-width="10"
+    <circle cx="50" cy="50" r="${r}" fill="none" stroke="${color || 'var(--accent)'}" stroke-width="10"
       stroke-linecap="round" stroke-dasharray="${(v * c).toFixed(1)} ${c.toFixed(1)}"
       transform="rotate(-90 50 50)"/>
     <text x="50" y="${sub ? 47 : 50}" text-anchor="middle" dominant-baseline="middle"
@@ -608,6 +645,12 @@ function donutSVG(value, label, sub, size) {
     ${sub ? `<text x="50" y="64" text-anchor="middle" font-size="10" font-weight="600" fill="var(--muted)">${esc(sub)}</text>` : ''}
   </svg>`;
 }
+/* cor do gauge de OEE conforme a meta: verde ≥ meta, vermelho < meta */
+function oeeColor(oee, targetPct) {
+  if (oee == null || targetPct == null) return null;
+  return oee * 100 >= targetPct ? 'var(--good)' : 'var(--bad)';
+}
+const targetOf = m => (m && m.oeeTarget > 0 ? m.oeeTarget : DEFAULT_OEE_TARGET);
 
 function aggregate(sessions) {
   const agg = { t: { prod: 0, stop: 0, idle: 0, wait: 0, total: 0 }, theo: 0, real: 0, scrap: 0, reasons: {}, nFinished: 0 };
@@ -625,6 +668,35 @@ function aggregate(sessions) {
   }
   return agg;
 }
+/* MTBF / MTBB / MTTA / MTTR — sobre paradas classificadas como falha ou quebra */
+function maintStats(sessions) {
+  let opTime = 0, nFail = 0, nBreak = 0;
+  const ttaList = [], ttrList = [];
+  for (const s of sessions) {
+    opTime += totals(s).prod;
+    for (const seg of segsOf(s)) {
+      if (seg.state !== 'stop' || !seg.kind || seg.kind === 'op') continue;
+      const end = seg.end || Date.now();
+      nFail++;                              // MTBF: toda falha (inclui quebras)
+      if (seg.kind === 'break') nBreak++;   // MTBB: só quebras físicas
+      if (seg.maintAt) {
+        ttaList.push(seg.maintAt - seg.start);
+        ttrList.push(end - seg.maintAt);
+      } else {
+        ttrList.push(end - seg.start);      // sem registro de chegada: reparo = parada inteira
+      }
+    }
+  }
+  const avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
+  return {
+    nFail, nBreak,
+    mtbf: nFail > 0 ? opTime / nFail : null,
+    mtbb: nBreak > 0 ? opTime / nBreak : null,
+    mtta: avg(ttaList),
+    mttr: avg(ttrList),
+  };
+}
+
 function oeeOf(agg) {
   const A = agg.t.total > 0 ? agg.t.prod / agg.t.total : null;
   const P = agg.nFinished > 0 && agg.theo > 0 ? agg.real / agg.theo : null;
@@ -681,10 +753,11 @@ function renderDash() {
     const o = oeeOf(ag);
     const live = db.active && db.active.machineId === m.id;
     return `<div class="mrow">
-      ${donutSVG(o.oee !== null ? o.oee : o.A, 'OEE ' + m.name, o.oee !== null ? 'OEE' : 'DISP')}
+      ${donutSVG(o.oee !== null ? o.oee : o.A, 'OEE ' + m.name, o.oee !== null ? 'OEE' : 'DISP',
+        o.oee !== null ? oeeColor(o.oee, targetOf(m)) : null)}
       <div class="info">
         <div class="nm">${esc(m.name)}${live ? ' <span style="color:var(--good);font-size:11px">● ao vivo</span>' : ''}</div>
-        <div class="sub">${esc(m.sector || '')} · ${fmtInt(ag.real)} pçs reais · ${fmtInt(ag.scrap)} refugo</div>
+        <div class="sub">${esc(m.sector || '')} · meta OEE ${targetOf(m)}% · ${fmtInt(ag.real)} pçs reais · ${fmtInt(ag.scrap)} refugo</div>
         <div class="mini">
           <span>Produzindo <b>${fmtDurLong(ag.t.prod)}</b></span><span>Parada <b>${fmtDurLong(ag.t.stop)}</b></span>
           <span>Ociosa <b>${fmtDurLong(ag.t.idle)}</b></span><span>Esperando <b>${fmtDurLong(ag.t.wait)}</b></span>
@@ -701,18 +774,42 @@ function renderDash() {
         <div class="kpi"><div class="k">Refugo</div><div class="v">${fmtInt(agg.scrap)} <small>pçs</small></div></div>
       </div></div>` : '';
 
+  /* meta de OEE do período: média das metas das máquinas com dados */
+  const targets = machines.map(targetOf);
+  const target = targets.length ? targets.reduce((a, b) => a + b, 0) / targets.length : DEFAULT_OEE_TARGET;
+
+  /* indicadores de manutenção */
+  const ms = maintStats(all);
+  const fmtM = v => v === null ? '—' : fmtDurLong(v);
+  const maintCard = `
+    <div class="card"><h2>Manutenção</h2>
+      <div class="kpi-row">
+        <div class="kpi"><div class="k">MTBF · entre falhas <span class="diff-pos">↑</span></div>
+          <div class="v">${fmtM(ms.mtbf)}</div><div class="k">${ms.nFail} falha(s)</div></div>
+        <div class="kpi"><div class="k">MTBB · entre quebras <span class="diff-pos">↑</span></div>
+          <div class="v">${fmtM(ms.mtbb)}</div><div class="k">${ms.nBreak} quebra(s)</div></div>
+        <div class="kpi"><div class="k">MTTA · atendimento <span class="diff-neg">↓</span></div>
+          <div class="v">${fmtM(ms.mtta)}</div><div class="k">chamado → chegada</div></div>
+        <div class="kpi"><div class="k">MTTR · reparo <span class="diff-neg">↓</span></div>
+          <div class="v">${fmtM(ms.mttr)}</div><div class="k">chegada → liberação</div></div>
+      </div>
+      <p class="hint" style="margin-top:10px">Classifique a parada como <b>Falha</b> ou <b>Quebra</b> e toque em “Manutenção chegou” durante a parada para alimentar MTTA e MTTR. Tempo operacional = tempo produzindo.</p>
+    </div>`;
+
   el.innerHTML = chips + `
     <div class="card">
       <h2>Visão geral · ${PERIODS[db.period][0].toLowerCase()}</h2>
       <div class="gauge-grid">
-        <div class="gauge gauge-hero" style="grid-column:1/-1">${donutSVG(oee, 'OEE', 'OEE')}
-          <span class="glabel">OEE ${oee === null ? '(finalize um apontamento p/ calcular)' : ''}</span></div>
+        <div class="gauge gauge-hero">${donutSVG(oee, 'OEE', 'OEE', oeeColor(oee, target))}
+          <span class="glabel">OEE ${oee === null ? '(finalize um apontamento p/ calcular)' : ''}</span>
+          <span class="gmeta">meta ${target.toFixed(0)}%${oee !== null ? (oee * 100 >= target ? ' · ✓ atingida' : ' · abaixo') : ''}</span></div>
         <div class="gauge">${donutSVG(A, 'Disponibilidade')}<span class="glabel">Disponibilidade</span></div>
         <div class="gauge">${donutSVG(P, 'Performance')}<span class="glabel">Performance</span></div>
-        <div class="gauge" style="grid-column:1/-1;max-width:50%;justify-self:center">${donutSVG(Q, 'Qualidade')}<span class="glabel">Qualidade</span></div>
+        <div class="gauge">${donutSVG(Q, 'Qualidade')}<span class="glabel">Qualidade</span></div>
       </div>
     </div>
     ${prodCard}
+    ${maintCard}
     <div class="card">
       <h2>Distribuição do tempo</h2>
       <div class="stackbar">${stack}</div>
@@ -769,6 +866,8 @@ function renderMaq() {
         <input id="mSetor" placeholder="Ex.: Extrusão" value="${editing ? esc(editing.sector || '') : ''}"></div>
       <div class="field"><label for="mTaxa">Capacidade nominal (peças por minuto)</label>
         <input id="mTaxa" type="number" inputmode="decimal" min="0.01" step="any" placeholder="Ex.: 100" value="${editing ? editing.rate : ''}"></div>
+      <div class="field"><label for="mMeta">Meta de OEE (%)</label>
+        <input id="mMeta" type="number" inputmode="decimal" min="1" max="100" step="any" placeholder="Ex.: ${DEFAULT_OEE_TARGET}" value="${editing && editing.oeeTarget ? editing.oeeTarget : ''}"></div>
       <button class="btn" id="mSave">${editing ? 'Salvar alterações' : '+ Cadastrar máquina'}</button>
       ${editing ? '<div style="height:8px"></div><button class="btn ghost" id="mCancelEdit">Cancelar edição</button>' : ''}
     </div>
@@ -778,7 +877,7 @@ function renderMaq() {
       ${db.machines.map(m => `
         <div class="list-row">
           <div class="info"><div class="nm">${esc(m.name)}</div>
-            <div class="sub">${esc(m.sector || 'sem setor')} · ${fmtInt(m.rate)} pçs/min</div></div>
+            <div class="sub">${esc(m.sector || 'sem setor')} · ${fmtInt(m.rate)} pçs/min · meta OEE ${targetOf(m)}%</div></div>
           <div class="act">
             <button data-edit="${m.id}">✎</button>
             <button data-del="${m.id}" style="color:var(--bad)">✕</button>
@@ -806,10 +905,12 @@ function renderMaq() {
   $('#mSave').onclick = () => {
     const name = $('#mNome').value.trim();
     const rate = parseFloat($('#mTaxa').value);
+    let meta = parseFloat($('#mMeta').value);
     if (!name) { $('#mNome').focus(); return; }
     if (!(rate > 0)) { $('#mTaxa').focus(); return; }
-    if (editing) { editing.name = name; editing.sector = $('#mSetor').value.trim(); editing.rate = rate; editingId = null; }
-    else db.machines.push({ id: uid(), name, sector: $('#mSetor').value.trim(), rate });
+    if (!(meta > 0 && meta <= 100)) meta = DEFAULT_OEE_TARGET;
+    if (editing) { editing.name = name; editing.sector = $('#mSetor').value.trim(); editing.rate = rate; editing.oeeTarget = meta; editingId = null; }
+    else db.machines.push({ id: uid(), name, sector: $('#mSetor').value.trim(), rate, oeeTarget: meta });
     save(); render();
   };
   if (editing) $('#mCancelEdit').onclick = () => { editingId = null; render(); };
