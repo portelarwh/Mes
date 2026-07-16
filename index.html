@@ -262,6 +262,41 @@
   .diff-pos { color: var(--good); }
   .diff-neg { color: var(--bad); }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+
+  .badge {
+    display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px;
+    border-radius: 999px; vertical-align: 2px; white-space: nowrap;
+  }
+  .badge.planned { background: var(--accent-soft); color: var(--accent); }
+  .badge.unplanned { background: rgba(227, 73, 72, .16); color: var(--bad); }
+
+  /* ============ Relatório executivo ============ */
+  .report-overlay {
+    position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.62);
+    display: none; flex-direction: column;
+  }
+  .report-overlay.open { display: flex; }
+  .report-bar {
+    display: flex; gap: 8px; padding: calc(10px + env(safe-area-inset-top)) 12px 10px;
+    background: var(--surface); border-bottom: 1px solid var(--grid);
+    max-width: 900px; width: 100%; margin: 0 auto;
+  }
+  .report-bar .btn { width: auto; flex: 1; padding: 12px 8px; font-size: 14px; }
+  .report-bar .btn.close { flex: 0 0 auto; }
+  .report-scroll { flex: 1; overflow: auto; padding: 12px; }
+  .report-scroll svg {
+    display: block; width: 100%; max-width: 900px; height: auto; margin: 0 auto;
+    border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,.4);
+  }
+  #printHost { display: none; }
+  @media print {
+    body.printing header, body.printing main, body.printing nav,
+    body.printing .overlay, body.printing .report-overlay { display: none !important; }
+    body.printing { padding: 0; max-width: none; background: #fff; }
+    body.printing #printHost { display: block; }
+    #printHost svg { width: 100%; height: auto; }
+  }
+  @page { size: A4 landscape; margin: 0; }
 </style>
 </head>
 <body>
@@ -292,11 +327,21 @@
 
 <div class="overlay" id="overlay"><div class="sheet" id="sheet"></div></div>
 
+<div class="report-overlay" id="repOverlay">
+  <div class="report-bar">
+    <button class="btn" id="repPng">⬇ Baixar PNG</button>
+    <button class="btn ghost" id="repPdf">🖨 Salvar PDF</button>
+    <button class="btn ghost close" id="repClose">✕</button>
+  </div>
+  <div class="report-scroll" id="repBody"></div>
+</div>
+<div id="printHost"></div>
+
 <script>
 /* =====================================================
    MES — Apontamento de produção, paradas e refugo
    ===================================================== */
-const APP_VERSION = '1.1.0';   // ⬅ suba a versão a cada atualização
+const APP_VERSION = '1.2.0';   // ⬅ suba a versão a cada atualização
 document.getElementById('verBadge').textContent = 'v' + APP_VERSION;
 
 const STATES = {
@@ -316,15 +361,30 @@ const DEFAULT_OEE_TARGET = 85; /* % */
 
 /* ---------- persistência ---------- */
 const KEY = 'mes_v1';
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 let db = load();
 function load() {
   try {
     const d = JSON.parse(localStorage.getItem(KEY));
-    if (d && d.machines) return d;
+    if (d && d.machines) {
+      /* migração v1.1 → v1.2: motivos eram textos; agora têm descrição e planejada/não planejada */
+      if (d.reasons && d.reasons.length && typeof d.reasons[0] === 'string') {
+        d.reasons = d.reasons.map(n => ({ id: uid(), name: n, desc: '', planned: /setup|troca|limpeza/i.test(n) }));
+      }
+      return d;
+    }
   } catch (e) {}
   return {
     machines: [],
-    reasons: ['Manutenção', 'Setup / Troca', 'Ajuste de processo', 'Falta de operador', 'Qualidade', 'Limpeza', 'Outro'],
+    reasons: [
+      { id: uid(), name: 'Manutenção corretiva', desc: 'Intervenção técnica não programada', planned: false },
+      { id: uid(), name: 'Setup / Troca',        desc: 'Troca de produto, ferramenta ou lote', planned: true },
+      { id: uid(), name: 'Ajuste de processo',   desc: '', planned: false },
+      { id: uid(), name: 'Falta de operador',    desc: '', planned: false },
+      { id: uid(), name: 'Qualidade',            desc: 'Bloqueio ou inspeção de qualidade', planned: false },
+      { id: uid(), name: 'Limpeza',              desc: 'Higienização programada', planned: true },
+      { id: uid(), name: 'Outro',                desc: '', planned: false },
+    ],
     sessions: [],
     active: null,
     theme: null,
@@ -332,7 +392,7 @@ function load() {
   };
 }
 function save() { localStorage.setItem(KEY, JSON.stringify(db)); }
-const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const reasonPlannedByName = n => { const r = db.reasons.find(x => x.name === n); return r ? !!r.planned : false; };
 
 /* ---------- tema ---------- */
 function applyTheme() {
@@ -520,33 +580,42 @@ function startSession(machineId) {
 }
 
 /* trocar de estado: fecha o segmento atual (qualquer categoria interrompe a produção) */
-function setState(state, reason, kind) {
+function setState(state, reason, kind, planned) {
   const a = db.active; if (!a) return;
   const now = Date.now();
   if (a.current) {
     if (a.current.state === state && (a.current.reason || null) === (reason || null)) return;
     a.segs.push({ ...a.current, end: now });
   }
-  a.current = { state, reason: reason || null, kind: kind || null, start: now };
+  a.current = { state, reason: reason || null, kind: kind || null,
+    planned: planned === undefined ? null : !!planned, start: now };
   save(); render();
 }
 
+const plannedBadge = p => `<span class="badge ${p ? 'planned' : 'unplanned'}">${p ? 'planejada' : 'não planejada'}</span>`;
+
 function openReasonSheet() {
   openSheet(`<h3>Motivo da parada</h3>
-    ${db.reasons.map((r, i) => `<button class="opt" data-r="${i}">${esc(r)}</button>`).join('')}
+    ${db.reasons.map((r, i) => `<button class="opt" data-r="${i}">
+      <b>${esc(r.name)}</b> ${plannedBadge(r.planned)}
+      ${r.desc ? `<br><span class="hint">${esc(r.desc)}</span>` : ''}</button>`).join('')}
     <button class="btn ghost" id="rCancel">Cancelar</button>`);
-  $('#sheet').querySelectorAll('[data-r]').forEach(b => b.onclick = () => openKindSheet(db.reasons[+b.dataset.r]));
+  $('#sheet').querySelectorAll('[data-r]').forEach(b => b.onclick = () => {
+    const r = db.reasons[+b.dataset.r];
+    if (r.planned) { setState('stop', r.name, 'op', true); closeSheet(); } /* planejada não é falha/quebra */
+    else openKindSheet(r);
+  });
   $('#rCancel').onclick = closeSheet;
 }
 
-function openKindSheet(reason) {
-  openSheet(`<h3>Tipo da parada — ${esc(reason)}</h3>
+function openKindSheet(r) {
+  openSheet(`<h3>Tipo da parada — ${esc(r.name)}</h3>
     <p class="hint">A classificação alimenta os indicadores MTBF, MTBB, MTTA e MTTR.</p>
     ${Object.entries(STOP_KINDS).map(([k, v]) =>
       `<button class="opt" data-k="${k}"><b>${v.label}</b><br><span class="hint">${v.hint}</span></button>`).join('')}
     <button class="btn ghost" id="kCancel">Cancelar</button>`);
   $('#sheet').querySelectorAll('[data-k]').forEach(b => b.onclick = () => {
-    setState('stop', reason, b.dataset.k); closeSheet();
+    setState('stop', r.name, b.dataset.k, r.planned); closeSheet();
   });
   $('#kCancel').onclick = closeSheet;
 }
@@ -653,7 +722,9 @@ function oeeColor(oee, targetPct) {
 const targetOf = m => (m && m.oeeTarget > 0 ? m.oeeTarget : DEFAULT_OEE_TARGET);
 
 function aggregate(sessions) {
-  const agg = { t: { prod: 0, stop: 0, idle: 0, wait: 0, total: 0 }, theo: 0, real: 0, scrap: 0, reasons: {}, nFinished: 0 };
+  const agg = { t: { prod: 0, stop: 0, idle: 0, wait: 0, total: 0 }, theo: 0, real: 0, scrap: 0,
+    reasons: {}, nFinished: 0,
+    stopPlanned: 0, stopUnplanned: 0, nStopPlanned: 0, nStopUnplanned: 0 };
   for (const s of sessions) {
     const t = totals(s);
     for (const k of ['prod','stop','idle','wait','total']) agg.t[k] += t[k];
@@ -662,7 +733,12 @@ function aggregate(sessions) {
     for (const seg of segsOf(s)) {
       if (seg.state === 'stop') {
         const r = seg.reason || 'Sem motivo';
-        agg.reasons[r] = (agg.reasons[r] || 0) + ((seg.end || Date.now()) - seg.start);
+        const dur = (seg.end || Date.now()) - seg.start;
+        const planned = seg.planned != null ? seg.planned : reasonPlannedByName(seg.reason);
+        const e = agg.reasons[r] || (agg.reasons[r] = { ms: 0, n: 0, plannedMs: 0 });
+        e.ms += dur; e.n++;
+        if (planned) { e.plannedMs += dur; agg.stopPlanned += dur; agg.nStopPlanned++; }
+        else { agg.stopUnplanned += dur; agg.nStopUnplanned++; }
       }
     }
   }
@@ -733,17 +809,23 @@ function renderDash() {
       <span class="tv">${fmtDurLong(agg.t[k])} · ${pct(agg.t[k] / tt, 0)}</span></div>`).join('');
 
   /* paradas por motivo (barras ordenadas, % acumulado como rótulo) */
-  const reasons = Object.entries(agg.reasons).sort((a, b) => b[1] - a[1]);
-  const stopTotal = reasons.reduce((s, r) => s + r[1], 0) || 1;
+  const reasons = Object.entries(agg.reasons).sort((a, b) => b[1].ms - a[1].ms);
+  const stopTotal = reasons.reduce((s, r) => s + r[1].ms, 0) || 1;
   let cum = 0;
-  const bars = reasons.map(([r, ms]) => {
-    cum += ms;
+  const bars = reasons.map(([r, e]) => {
+    cum += e.ms;
+    const planned = e.plannedMs >= e.ms / 2;
     return `<div class="hbar">
-      <div class="top"><span class="n">${esc(r)}</span>
-        <span class="v">${fmtDurLong(ms)} · ${pct(ms / stopTotal, 0)} <span style="color:var(--muted)">(acum. ${pct(cum / stopTotal, 0)})</span></span></div>
-      <div class="track"><div class="fill" style="width:${(ms / reasons[0][1] * 100).toFixed(1)}%"></div></div>
+      <div class="top"><span class="n">${esc(r)} ${plannedBadge(planned)}</span>
+        <span class="v">${fmtDurLong(e.ms)} · ${pct(e.ms / stopTotal, 0)} <span style="color:var(--muted)">(acum. ${pct(cum / stopTotal, 0)})</span></span></div>
+      <div class="track"><div class="fill" style="width:${(e.ms / reasons[0][1].ms * 100).toFixed(1)}%${planned ? ';background:var(--accent)' : ''}"></div></div>
     </div>`;
   }).join('');
+  const plannedSplit = agg.t.stop > 0 ? `
+    <div class="kpi-row" style="margin-bottom:12px">
+      <div class="kpi"><div class="k">Não planejadas</div><div class="v" style="color:var(--bad)">${fmtDurLong(agg.stopUnplanned)}</div><div class="k">${agg.nStopUnplanned} evento(s)</div></div>
+      <div class="kpi"><div class="k">Planejadas</div><div class="v" style="color:var(--accent)">${fmtDurLong(agg.stopPlanned)}</div><div class="k">${agg.nStopPlanned} evento(s)</div></div>
+    </div>` : '';
 
   /* por máquina */
   const machines = db.machines.filter(m => all.some(s => s.machineId === m.id));
@@ -797,6 +879,7 @@ function renderDash() {
     </div>`;
 
   el.innerHTML = chips + `
+    <button class="btn ghost" id="repBtn">📄 Relatório executivo — salvar PNG / PDF</button>
     <div class="card">
       <h2>Visão geral · ${PERIODS[db.period][0].toLowerCase()}</h2>
       <div class="gauge-grid">
@@ -821,6 +904,7 @@ function renderDash() {
     </div>
     <div class="card">
       <h2>Paradas — principais motivos</h2>
+      ${plannedSplit}
       ${reasons.length ? `<div class="hbars">${bars}</div>` : '<p class="hint">Nenhuma parada apontada no período. 🎉</p>'}
     </div>
     <div class="card">
@@ -839,6 +923,7 @@ function renderDash() {
     </div>`;
 
   bindChips(el);
+  $('#repBtn').onclick = openReport;
   el.querySelectorAll('[data-del-sess]').forEach(b => b.onclick = () => {
     openSheet(`<h3>Excluir este apontamento?</h3>
       <button class="btn danger" id="dsY">Sim, excluir</button><button class="btn ghost" id="dsN">Voltar</button>`);
@@ -887,14 +972,15 @@ function renderMaq() {
 
     <div class="card">
       <h2>Motivos de parada</h2>
-      <div class="tagline">${db.reasons.map((r, i) =>
-        `<span>${esc(r)}<button data-delr="${i}" aria-label="remover">✕</button></span>`).join('')}</div>
+      <p class="hint" style="margin-bottom:6px">Tipo, descrição e classificação (planejada ou não planejada) de cada motivo. Paradas planejadas não contam como falha/quebra.</p>
+      ${db.reasons.map((r, i) => `
+        <div class="list-row">
+          <div class="info"><div class="nm">${esc(r.name)} ${plannedBadge(r.planned)}</div>
+            <div class="sub">${esc(r.desc || 'sem descrição')}</div></div>
+          <div class="act"><button data-editr="${i}">✎</button><button data-delr="${i}" style="color:var(--bad)">✕</button></div>
+        </div>`).join('')}
       <div style="height:12px"></div>
-      <div class="field" style="margin:0"><label class="sr" for="rNew">Novo motivo</label>
-        <div style="display:flex;gap:8px">
-          <input id="rNew" placeholder="Novo motivo…" style="flex:1;padding:12px;border-radius:10px;border:1px solid var(--baseline);background:var(--page)">
-          <button class="btn" id="rAdd" style="width:auto;padding:12px 16px">+</button>
-        </div></div>
+      <button class="btn ghost" id="rAdd">+ Novo motivo de parada</button>
     </div>
 
     <div class="card">
@@ -929,11 +1015,243 @@ function renderMaq() {
     $('#dmN').onclick = closeSheet;
   });
   el.querySelectorAll('[data-delr]').forEach(b => b.onclick = () => { db.reasons.splice(+b.dataset.delr, 1); save(); render(); });
-  $('#rAdd').onclick = () => {
-    const v = $('#rNew').value.trim();
-    if (v && !db.reasons.includes(v)) { db.reasons.push(v); save(); render(); }
+  el.querySelectorAll('[data-editr]').forEach(b => b.onclick = () => openReasonEditSheet(+b.dataset.editr));
+  $('#rAdd').onclick = () => openReasonEditSheet(null);
+}
+
+/* editor de motivo de parada: tipo (nome), descrição e planejada/não planejada */
+function openReasonEditSheet(idx) {
+  const r = idx != null ? db.reasons[idx] : { name: '', desc: '', planned: false };
+  openSheet(`<h3>${idx != null ? 'Editar' : 'Novo'} motivo de parada</h3>
+    <div class="field"><label for="reName">Tipo (nome)</label>
+      <input id="reName" value="${esc(r.name)}" placeholder="Ex.: Setup / Troca"></div>
+    <div class="field"><label for="reDesc">Descrição</label>
+      <input id="reDesc" value="${esc(r.desc || '')}" placeholder="Ex.: troca de produto, ferramenta ou lote"></div>
+    <div class="field" style="margin-bottom:4px"><label>Classificação</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <button class="btn ghost" id="rePlan">📅 Planejada</button>
+        <button class="btn ghost" id="reUnplan">⚠️ Não planejada</button>
+      </div></div>
+    <button class="btn" id="reSave">Salvar</button>
+    <button class="btn ghost" id="reCancel">Cancelar</button>`);
+  let planned = !!r.planned;
+  const paint = () => {
+    $('#rePlan').style.cssText = planned ? 'background:var(--accent);color:var(--btn-ink)' : '';
+    $('#reUnplan').style.cssText = planned ? '' : 'background:var(--bad);color:var(--btn-ink)';
+  };
+  paint();
+  $('#rePlan').onclick = () => { planned = true; paint(); };
+  $('#reUnplan').onclick = () => { planned = false; paint(); };
+  $('#reCancel').onclick = closeSheet;
+  $('#reSave').onclick = () => {
+    const name = $('#reName').value.trim();
+    if (!name) { $('#reName').focus(); return; }
+    const desc = $('#reDesc').value.trim();
+    if (idx != null) Object.assign(db.reasons[idx], { name, desc, planned });
+    else db.reasons.push({ id: uid(), name, desc, planned });
+    save(); closeSheet(); render();
   };
 }
+
+/* =====================================================
+   RELATÓRIO EXECUTIVO (one page — PNG / PDF)
+   ===================================================== */
+let lastReportSVG = '';
+
+function reportData() {
+  const from = periodStart(db.period);
+  const done = db.sessions.filter(s => s.end >= from);
+  const all = db.active ? [...done, db.active] : done;
+  const agg = aggregate(all);
+  const machines = db.machines.filter(m => all.some(s => s.machineId === m.id));
+  const targets = machines.map(targetOf);
+  const target = targets.length ? targets.reduce((a, b) => a + b, 0) / targets.length : DEFAULT_OEE_TARGET;
+  const perMachine = machines.map(m => {
+    const sess = all.filter(s => s.machineId === m.id);
+    const ag = aggregate(sess);
+    return { m, ag, o: oeeOf(ag) };
+  });
+  return { done, all, agg, o: oeeOf(agg), target, maint: maintStats(all), perMachine };
+}
+
+/* SVG desenhado com cores fixas (superfície clara) — imprime bem e exporta para PNG sem depender do tema */
+function buildReportSVG(d) {
+  const W = 1123, H = 794; /* A4 paisagem @96dpi */
+  const C = { page: '#f7f6f3', card: '#ffffff', ink: '#0b0b0b', ink2: '#52514e', muted: '#898781',
+    grid: '#e1e0d9', track: '#eceae4', accent: '#2a78d6', good: '#0ca30c', bad: '#d03b3b',
+    prod: '#2a78d6', stop: '#e34948', idle: '#4a3aa7', wait: '#eda100' };
+  const FONT = `system-ui,-apple-system,'Segoe UI',sans-serif`;
+  const fmtP = v => v == null ? '—' : (v * 100).toFixed(1).replace('.', ',') + '%';
+  const tr = (s, n) => s.length > n ? s.slice(0, n - 1) + '…' : s;
+  const txt = (x, y, t, sz, w, fill, anchor) =>
+    `<text x="${x}" y="${y}" font-size="${sz}" font-weight="${w}" fill="${fill}" text-anchor="${anchor || 'start'}" font-family="${FONT}">${esc(t)}</text>`;
+  const card = (x, y, w, h, title) =>
+    `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="12" fill="${C.card}" stroke="${C.grid}"/>` +
+    txt(x + 16, y + 26, title.toUpperCase(), 11, 700, C.ink2);
+  const tile = (x, y, w, label, value, sub, valueColor) =>
+    `<rect x="${x}" y="${y}" width="${w}" height="74" rx="10" fill="${C.page}" stroke="${C.grid}"/>` +
+    txt(x + 12, y + 20, label, 10, 700, C.muted) +
+    txt(x + 12, y + 48, value, 19, 800, valueColor || C.ink) +
+    (sub ? txt(x + 12, y + 65, sub, 9.5, 600, C.muted) : '');
+  const donut = (cx, cy, r, sw, v, color, big, small) => {
+    const c = 2 * Math.PI * r, vv = Math.max(0, Math.min(1, v || 0));
+    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${C.track}" stroke-width="${sw}"/>` +
+      `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-linecap="round"
+        stroke-dasharray="${(vv * c).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 ${cx} ${cy})"/>` +
+      txt(cx, cy + 2, big, 23, 800, C.ink, 'middle') +
+      txt(cx, cy + 20, small, 10, 700, C.muted, 'middle');
+  };
+  const bar = (x, y, w, h, frac, color) =>
+    `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${h / 2}" fill="${C.track}"/>` +
+    `<rect x="${x}" y="${y}" width="${Math.max(2, w * Math.max(0, Math.min(1, frac))).toFixed(1)}" height="${h}" rx="${h / 2}" fill="${color}"/>`;
+
+  const { agg, o, target, maint, perMachine, done } = d;
+  const oeeCol = o.oee == null ? C.accent : (o.oee * 100 >= target ? C.good : C.bad);
+  let s = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`;
+  s += `<rect width="${W}" height="${H}" fill="${C.page}"/>`;
+
+  /* cabeçalho */
+  s += txt(24, 42, 'Relatório Executivo — Produção', 21, 800, C.ink);
+  s += txt(24, 62, `Período: ${PERIODS[db.period][0]} · ${perMachine.length} máquina(s) · ${done.length} apontamento(s)`, 12, 600, C.ink2);
+  s += txt(W - 24, 40, `Gerado em ${new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`, 11, 600, C.ink2, 'end');
+  s += txt(W - 24, 58, `MES v${APP_VERSION}`, 11, 700, C.muted, 'end');
+
+  const y1 = 78, h1 = 236, y2 = y1 + h1 + 12, h2 = 212, y3 = y2 + h2 + 12, h3 = 216;
+
+  /* ---- OEE Real ---- */
+  s += card(24, y1, 352, h1, 'OEE Real');
+  [['Disponibilidade', o.A], ['Performance', o.P], ['Qualidade', o.Q]].forEach(([lbl, v], i) => {
+    const ry = y1 + 70 + i * 54;
+    s += txt(40, ry, fmtP(v), 17, 800, C.ink);
+    s += txt(40, ry + 16, lbl, 10.5, 600, C.muted);
+    s += bar(40, ry + 24, 150, 7, v || 0, C.accent);
+  });
+  s += donut(294, y1 + 128, 58, 15, o.oee, oeeCol, fmtP(o.oee), 'OEE');
+  s += txt(294, y1 + 218, `meta ${target.toFixed(0)}%${o.oee != null ? (o.oee * 100 >= target ? ' · ✓ atingida' : ' · abaixo da meta') : ''}`, 11, 700, o.oee == null ? C.muted : oeeCol, 'middle');
+
+  /* ---- Pareto de paradas ---- */
+  s += card(392, y1, 356, h1, 'Paradas — Pareto');
+  const reasons = Object.entries(agg.reasons).sort((a, b) => b[1].ms - a[1].ms);
+  const stopTotal = reasons.reduce((t, r) => t + r[1].ms, 0) || 1;
+  if (!reasons.length) s += txt(408, y1 + 60, 'Nenhuma parada no período.', 12, 600, C.muted);
+  let cum = 0;
+  reasons.slice(0, 5).forEach(([name, e], i) => {
+    cum += e.ms;
+    const ry = y1 + 58 + i * 34;
+    const planned = e.plannedMs >= e.ms / 2;
+    s += `<text x="408" y="${ry}" font-size="11.5" font-weight="700" fill="${C.ink}" font-family="${FONT}">${esc(tr(name, 22))} <tspan font-size="8.5" fill="${planned ? C.accent : C.bad}">${planned ? 'PLANEJADA' : 'NÃO PLANEJADA'}</tspan></text>`;
+    s += `<text x="${392 + 356 - 16}" y="${ry}" font-size="10.5" font-weight="700" fill="${C.ink}" text-anchor="end" font-family="${FONT}">${esc(fmtDurLong(e.ms))} · ${Math.round(e.ms / stopTotal * 100)}% <tspan fill="${C.muted}" font-weight="600">(Σ ${Math.round(cum / stopTotal * 100)}%)</tspan></text>`;
+    s += bar(408, ry + 7, 356 - 32, 6, e.ms / reasons[0][1].ms, planned ? C.accent : C.stop);
+  });
+  if (reasons.length > 5) {
+    const rest = reasons.slice(5).reduce((t, r) => t + r[1].ms, 0);
+    s += txt(408, y1 + 58 + 5 * 34, `+ ${reasons.length - 5} outros motivos · ${fmtDurLong(rest)}`, 10.5, 600, C.muted);
+  }
+
+  /* ---- Produção ---- */
+  s += card(764, y1, 335, h1, 'Produção');
+  const diff = agg.real - agg.theo;
+  s += tile(778, y1 + 42, 148, 'TEÓRICA', fmtInt(agg.theo) + ' pçs');
+  s += tile(936, y1 + 42, 148, 'REAL', fmtInt(agg.real) + ' pçs');
+  s += tile(778, y1 + 126, 148, 'DIFERENÇA', (diff >= 0 ? '+' : '') + fmtInt(diff), 'real − teórica', diff >= 0 ? C.good : C.bad);
+  s += tile(936, y1 + 126, 148, 'REFUGO', fmtInt(agg.scrap) + ' pçs', agg.real > 0 ? pct(agg.scrap / agg.real) + ' do real' : '');
+  s += txt(778, y1 + 222, agg.nFinished > 0 ? `${agg.nFinished} apontamento(s) finalizado(s)` : 'Nenhum apontamento finalizado no período', 10.5, 600, C.muted);
+
+  /* ---- Distribuição do tempo ---- */
+  s += card(24, y2, 352, h2, 'Distribuição do tempo');
+  const tt = agg.t.total || 1;
+  let sx = 40;
+  const sbw = 320 - 6;
+  STATE_ORDER.forEach(k => {
+    const w = sbw * agg.t[k] / tt;
+    if (w > 0.5) { s += `<rect x="${sx.toFixed(1)}" y="${y2 + 44}" width="${w.toFixed(1)}" height="20" rx="3" fill="${{ prod: C.prod, stop: C.stop, idle: C.idle, wait: C.wait }[k]}"/>`; sx += w + 2; }
+  });
+  STATE_ORDER.forEach((k, i) => {
+    const ry = y2 + 92 + i * 25;
+    s += `<rect x="40" y="${ry - 9}" width="11" height="11" rx="3" fill="${{ prod: C.prod, stop: C.stop, idle: C.idle, wait: C.wait }[k]}"/>`;
+    s += txt(58, ry, STATES[k].label, 11.5, 600, C.ink2);
+    s += txt(360, ry, `${fmtDurLong(agg.t[k])} · ${Math.round(agg.t[k] / tt * 100)}%`, 11.5, 700, C.ink, 'end');
+  });
+  s += txt(40, y2 + 196, 'Total medido', 11.5, 800, C.ink);
+  s += txt(360, y2 + 196, fmtDurLong(agg.t.total), 11.5, 800, C.ink, 'end');
+
+  /* ---- Manutenção ---- */
+  s += card(392, y2, 356, h2, 'Manutenção');
+  const fmtM = v => v == null ? '—' : fmtDurLong(v);
+  s += tile(408, y2 + 42, 158, 'MTBF · ENTRE FALHAS ↑', fmtM(maint.mtbf), `${maint.nFail} falha(s)`);
+  s += tile(576, y2 + 42, 158, 'MTBB · ENTRE QUEBRAS ↑', fmtM(maint.mtbb), `${maint.nBreak} quebra(s)`);
+  s += tile(408, y2 + 126, 158, 'MTTA · ATENDIMENTO ↓', fmtM(maint.mtta), 'chamado → chegada');
+  s += tile(576, y2 + 126, 158, 'MTTR · REPARO ↓', fmtM(maint.mttr), 'chegada → liberação');
+
+  /* ---- Planejadas × não planejadas ---- */
+  s += card(764, y2, 335, h2, 'Paradas planejadas × não planejadas');
+  const st = agg.t.stop || 1;
+  [['Não planejada', agg.stopUnplanned, agg.nStopUnplanned, C.bad],
+   ['Planejada', agg.stopPlanned, agg.nStopPlanned, C.accent]].forEach(([lbl, ms, n, col], i) => {
+    const ry = y2 + 76 + i * 62;
+    s += txt(780, ry, lbl, 12, 700, C.ink);
+    s += txt(1083, ry, `${fmtDurLong(ms)} · ${Math.round(ms / st * 100)}% · ${n} evento(s)`, 11, 700, C.ink, 'end');
+    s += bar(780, ry + 8, 303, 8, ms / st, col);
+  });
+  s += txt(780, y2 + 196, 'Percentuais sobre o tempo total de paradas.', 9.5, 600, C.muted);
+
+  /* ---- Por máquina ---- */
+  s += card(24, y3, W - 48, h3, 'Por máquina');
+  const cols = [['MÁQUINA', 40, 'start'], ['OEE', 400, 'end'], ['META', 480, 'end'], ['DISP.', 570, 'end'],
+    ['PERF.', 660, 'end'], ['QUAL.', 750, 'end'], ['REAL', 850, 'end'], ['REFUGO', 950, 'end'], ['PARADA', 1075, 'end']];
+  cols.forEach(([t, x, a]) => s += txt(x, y3 + 48, t, 9.5, 700, C.muted, a));
+  s += `<line x1="40" y1="${y3 + 56}" x2="${W - 40}" y2="${y3 + 56}" stroke="${C.grid}"/>`;
+  if (!perMachine.length) s += txt(40, y3 + 84, 'Sem dados de máquina no período.', 12, 600, C.muted);
+  perMachine.slice(0, 5).forEach(({ m, ag, o: mo }, i) => {
+    const ry = y3 + 78 + i * 26;
+    const mT = targetOf(m);
+    const oc = mo.oee == null ? C.ink : (mo.oee * 100 >= mT ? C.good : C.bad);
+    s += txt(40, ry, tr(m.name + (m.sector ? ' · ' + m.sector : ''), 42), 12, 700, C.ink);
+    s += txt(400, ry, fmtP(mo.oee), 12, 800, oc, 'end');
+    s += txt(480, ry, mT.toFixed(0) + '%', 11.5, 600, C.ink2, 'end');
+    s += txt(570, ry, fmtP(mo.A), 11.5, 600, C.ink2, 'end');
+    s += txt(660, ry, fmtP(mo.P), 11.5, 600, C.ink2, 'end');
+    s += txt(750, ry, fmtP(mo.Q), 11.5, 600, C.ink2, 'end');
+    s += txt(850, ry, fmtInt(ag.real), 11.5, 600, C.ink2, 'end');
+    s += txt(950, ry, fmtInt(ag.scrap), 11.5, 600, C.ink2, 'end');
+    s += txt(1075, ry, fmtDurLong(ag.t.stop), 11.5, 600, C.ink2, 'end');
+  });
+  if (perMachine.length > 5) s += txt(40, y3 + 78 + 5 * 26, `+ ${perMachine.length - 5} máquina(s) não exibida(s)`, 10.5, 600, C.muted);
+
+  /* rodapé */
+  s += txt(24, H - 12, 'MES — apontamento manual de produção · OEE = Disponibilidade × Performance × Qualidade', 9.5, 600, C.muted);
+  s += txt(W - 24, H - 12, 'dados registrados no aparelho', 9.5, 600, C.muted, 'end');
+  s += '</svg>';
+  return s;
+}
+
+function openReport() {
+  lastReportSVG = buildReportSVG(reportData());
+  $('#repBody').innerHTML = lastReportSVG;
+  $('#printHost').innerHTML = lastReportSVG;
+  $('#repOverlay').classList.add('open');
+}
+$('#repClose').onclick = () => $('#repOverlay').classList.remove('open');
+$('#repPdf').onclick = () => { document.body.classList.add('printing'); window.print(); };
+window.addEventListener('afterprint', () => document.body.classList.remove('printing'));
+$('#repPng').onclick = () => {
+  const blob = new Blob([lastReportSVG], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+  img.onload = () => {
+    const scale = 2, c = document.createElement('canvas');
+    c.width = 1123 * scale; c.height = 794 * scale;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(img, 0, 0, c.width, c.height);
+    URL.revokeObjectURL(url);
+    const a = document.createElement('a');
+    a.download = `relatorio-mes-${new Date().toISOString().slice(0, 10)}.png`;
+    a.href = c.toDataURL('image/png');
+    a.click();
+  };
+  img.src = url;
+};
 
 /* =====================================================
    Sheet / overlay

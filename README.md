@@ -16,7 +16,9 @@ Pages**: Settings → Pages → branch `main` → `/ (root)`.
    peças/minuto — ex.: 100 pçs/min — e **meta de OEE em %**).
 2. **Apontar** → escolha a máquina e toque no estado atual:
    - ▸ **Produção** — a contagem teórica sobe (capacidade × tempo produzindo);
-   - ▸ **Parada** — escolhe o motivo (lista editável) e o **tipo**:
+   - ▸ **Parada** — escolhe o motivo (com badge **planejada / não planejada**;
+     motivos planejados como setup e limpeza não pedem classificação de falha)
+     e, para os não planejados, o **tipo**:
      **Falha** (sensor, alarme, travamento, automação), **Quebra** (dano
      físico, troca de peça) ou **Operacional** (setup, limpeza…). Em falhas e
      quebras, toque em **“Manutenção chegou”** quando o técnico chegar — isso
@@ -31,8 +33,15 @@ Pages**: Settings → Pages → branch `main` → `/ (root)`.
 4. **Dashboard** → OEE (gauge **verde se ≥ meta, vermelho se abaixo**),
    Disponibilidade, Performance e Qualidade lado a lado, indicadores de
    manutenção (MTBF, MTBB, MTTA, MTTR), distribuição do tempo, principais
-   motivos de parada e resumo por máquina, com filtro de período
-   (hoje / 7 / 30 dias / tudo).
+   motivos de parada (com split planejadas × não planejadas) e resumo por
+   máquina, com filtro de período (hoje / 7 / 30 dias / tudo).
+5. **Relatório executivo** → botão no topo do Dashboard gera um relatório de
+   uma página (A4 paisagem) com OEE real, Pareto de paradas, produção,
+   manutenção, distribuição do tempo e tabela por máquina — exportável em
+   **PNG** (download direto) ou **PDF** (diálogo de impressão do navegador).
+
+Os **motivos de parada** são configuráveis na aba Máquinas: tipo (nome),
+descrição e classificação **planejada / não planejada**.
 
 ## Cálculos
 
