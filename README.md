@@ -26,6 +26,12 @@ Pages**: Settings → Pages → branch `main` → `/ (root)`.
    - ▸ **Ociosa** — sem insumo;
    - ▸ **Esperando** — aguardando a máquina da frente puxar.
 
+   Um interruptor na tela permite escolher entre **parada com detalhe** (pede
+   o motivo na hora) e **parada simples** (só registra que parou; o motivo
+   pode ser definido depois). Todas as marcações da medição aparecem numa
+   lista com botão ✎ para **corrigir** — trocar o estado (ex.: marcou Ociosa
+   mas era Esperando) ou definir/alterar o motivo de uma parada.
+
    Tocar em qualquer estado **encerra o anterior** — apontar uma parada sempre
    interrompe a produção. Os 4 cronômetros acumulam em tempo real.
 3. **Finalizar** → informe a **produção real** contada e o **refugo**. O app

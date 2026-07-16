@@ -162,7 +162,18 @@
 
   .time-list { display: grid; gap: 8px; }
   .time-row { display: flex; align-items: center; gap: 10px; font-size: 14px; }
-  .time-row .sw { width: 12px; height: 12px; border-radius: 4px; flex: none; }
+  .sw { width: 12px; height: 12px; border-radius: 4px; flex: none; }
+  .toggle-row { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--ink-2); margin-top: 14px; }
+  .toggle-row input {
+    width: 42px; height: 24px; flex: none; appearance: none; -webkit-appearance: none;
+    background: var(--track); border-radius: 999px; position: relative; transition: background .15s; cursor: pointer;
+  }
+  .toggle-row input:checked { background: var(--accent); }
+  .toggle-row input::after {
+    content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
+    border-radius: 50%; background: #fff; transition: left .15s;
+  }
+  .toggle-row input:checked::after { left: 21px; }
   .time-row .nm { flex: 1; color: var(--ink-2); }
   .time-row .tv { font-weight: 700; font-variant-numeric: tabular-nums; }
 
@@ -341,7 +352,7 @@
 /* =====================================================
    MES — Apontamento de produção, paradas e refugo
    ===================================================== */
-const APP_VERSION = '1.3.0';   // ⬅ suba a versão a cada atualização
+const APP_VERSION = '1.4.0';   // ⬅ suba a versão a cada atualização
 document.getElementById('verBadge').textContent = 'v' + APP_VERSION;
 
 const STATES = {
@@ -389,6 +400,7 @@ function load() {
     active: null,
     theme: null,
     period: '7d',
+    askDetail: true, /* pedir motivo ao marcar parada (false = parada simples, detalhar depois) */
   };
 }
 function save() { localStorage.setItem(KEY, JSON.stringify(db)); }
@@ -516,9 +528,11 @@ function renderApontar() {
       </div>
 
       <div class="now-state ${cur ? '' : 'none'}" style="${cur ? 'background:' + curSt.color : ''}">
-        <span class="lbl">${cur ? esc(curSt.label + (cur.reason ? ' — ' + cur.reason : '') + (cur.kind ? ' · ' + STOP_KINDS[cur.kind].label : '')) : 'Toque em um estado para começar'}</span>
+        <span class="lbl">${cur ? esc(segLabel(cur)) : 'Toque em um estado para começar'}</span>
         <span class="tm" id="tState">${cur ? '' : '—'}</span>
       </div>
+
+      ${cur && cur.state === 'stop' && !cur.reason ? '<div style="height:10px"></div><button class="btn ghost" id="detailBtn">📝 Definir motivo da parada (opcional)</button>' : ''}
 
       ${cur && cur.state === 'stop' && cur.planned && cur.stdMs ? '<p class="hint" id="stdHint" style="margin-top:8px"></p>' : ''}
       ${cur && cur.state === 'stop' && cur.kind && cur.kind !== 'op' ? (
@@ -533,6 +547,10 @@ function renderApontar() {
           <button class="state-btn ${STATES[k].cls} ${cur && cur.state === k ? 'current' : ''}" data-state="${k}">
             ${STATES[k].btn}<small>${STATES[k].sub}</small>
           </button>`).join('')}
+      </div>
+      <div class="toggle-row">
+        <input type="checkbox" id="detailToggle" ${db.askDetail !== false ? 'checked' : ''}>
+        <span>Pedir motivo ao marcar <b>Parada</b> — desligue para apontar só “parou” e detalhar depois</span>
       </div>
     </div>
 
@@ -550,6 +568,13 @@ function renderApontar() {
       <div class="time-list" id="timeList"></div>
     </div>
 
+    <div class="card">
+      <h2>Marcações desta medição (${a.segs.length + (cur ? 1 : 0)})</h2>
+      ${a.segs.length + (cur ? 1 : 0)
+        ? '<p class="hint" style="margin-bottom:6px">Toque em ✎ para corrigir uma marcação — ex.: marcou Ociosa mas era Esperando, ou definir o motivo de uma parada.</p>' + renderSegList(a)
+        : '<p class="hint">Nada marcado ainda.</p>'}
+    </div>
+
     <div style="display:grid;gap:10px">
       <button class="btn" id="finishBtn">✓ Finalizar e apontar produção real</button>
       <button class="btn ghost" id="cancelBtn">Descartar apontamento</button>
@@ -558,9 +583,15 @@ function renderApontar() {
   el.querySelectorAll('[data-state]').forEach(b => {
     b.onclick = () => {
       const k = b.dataset.state;
-      if (k === 'stop') openReasonSheet();
+      if (k === 'stop') { db.askDetail !== false ? openReasonSheet() : setState('stop'); }
       else setState(k);
     };
+  });
+  $('#detailToggle').onchange = e => { db.askDetail = e.target.checked; save(); };
+  const db_ = $('#detailBtn'); if (db_) db_.onclick = () => openSegReasonSheet('cur');
+  el.querySelectorAll('[data-editseg]').forEach(b => b.onclick = () => {
+    const v = b.dataset.editseg;
+    openSegEditSheet(v === 'cur' ? 'cur' : +v);
   });
   const mb = $('#maintBtn'); if (mb) mb.onclick = markMaintArrived;
   $('#finishBtn').onclick = openFinishSheet;
@@ -622,6 +653,86 @@ function openKindSheet(r) {
   $('#kCancel').onclick = closeSheet;
 }
 
+/* ---------- lista de marcações da medição (editável) ---------- */
+function segLabel(seg) {
+  let l = STATES[seg.state].label;
+  if (seg.state === 'stop') l += seg.reason ? ' — ' + seg.reason : ' — sem motivo';
+  if (seg.kind && seg.kind !== 'op') l += ' · ' + STOP_KINDS[seg.kind].label;
+  return l;
+}
+const fmtHM = ms => new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+function renderSegList(a) {
+  const row = (idx, seg, live) => `
+    <div class="list-row">
+      <span class="sw" style="background:${STATES[seg.state].color}"></span>
+      <div class="info">
+        <div class="nm" style="font-size:13.5px">${esc(segLabel(seg))}
+          ${seg.state === 'stop' && seg.planned != null ? plannedBadge(seg.planned) : ''}
+          ${live ? '<span style="color:var(--good);font-size:11px">● agora</span>' : ''}</div>
+        <div class="sub">${fmtHM(seg.start)}–${live ? '…' : fmtHM(seg.end)} · <span ${live ? 'id="curSegDur"' : ''}>${fmtDur((live ? Date.now() : seg.end) - seg.start)}</span></div>
+      </div>
+      <div class="act"><button data-editseg="${idx}" aria-label="corrigir">✎</button></div>
+    </div>`;
+  const rows = [];
+  if (a.current) rows.push(row('cur', a.current, true));
+  for (let i = a.segs.length - 1; i >= 0; i--) rows.push(row(i, a.segs[i], false));
+  return rows.join('');
+}
+
+function applySegEdit(idx, patch) {
+  const a = db.active; if (!a) return;
+  const seg = idx === 'cur' ? a.current : a.segs[idx];
+  if (!seg) return;
+  Object.assign(seg, patch);
+  if (seg.state !== 'stop') { seg.reason = null; seg.kind = null; seg.planned = null; seg.stdMs = null; delete seg.maintAt; }
+  else if (!seg.kind || seg.kind === 'op') delete seg.maintAt;
+  save(); closeSheet(); render();
+}
+
+function openSegEditSheet(idx) {
+  const a = db.active; if (!a) return;
+  const seg = idx === 'cur' ? a.current : a.segs[idx];
+  if (!seg) return;
+  openSheet(`<h3>Corrigir marcação</h3>
+    <p class="hint">${esc(segLabel(seg))} · ${fmtHM(seg.start)}–${idx === 'cur' ? 'agora' : fmtHM(seg.end)}</p>
+    ${STATE_ORDER.map(k => `<button class="opt" data-k="${k}" ${k === seg.state ? 'style="outline:2px solid var(--accent)"' : ''}>
+      <b>${STATES[k].label}</b>${k === 'stop' ? '<br><span class="hint">escolhe o motivo em seguida</span>' : ''}</button>`).join('')}
+    <button class="btn ghost" id="seCancel">Cancelar</button>`);
+  $('#sheet').querySelectorAll('[data-k]').forEach(b => b.onclick = () => {
+    const k = b.dataset.k;
+    if (k === 'stop') openSegReasonSheet(idx);
+    else applySegEdit(idx, { state: k });
+  });
+  $('#seCancel').onclick = closeSheet;
+}
+
+function openSegReasonSheet(idx) {
+  openSheet(`<h3>Motivo da parada</h3>
+    <button class="opt" data-r="none"><b>Sem motivo</b><br><span class="hint">definir depois</span></button>
+    ${db.reasons.map((r, i) => `<button class="opt" data-r="${i}">
+      <b>${esc(r.name)}</b> ${plannedBadge(r.planned)}${r.planned && r.stdMin > 0 ? ` <span class="hint">padrão ${r.stdMin}min</span>` : ''}
+      ${r.desc ? `<br><span class="hint">${esc(r.desc)}</span>` : ''}</button>`).join('')}
+    <button class="btn ghost" id="srCancel">Cancelar</button>`);
+  $('#sheet').querySelectorAll('[data-r]').forEach(b => b.onclick = () => {
+    if (b.dataset.r === 'none') return applySegEdit(idx, { state: 'stop', reason: null, kind: null, planned: null, stdMs: null });
+    const r = db.reasons[+b.dataset.r];
+    if (r.planned) applySegEdit(idx, { state: 'stop', reason: r.name, kind: 'op', planned: true, stdMs: (r.stdMin || 0) * 60000 });
+    else openSegKindSheet(idx, r);
+  });
+  $('#srCancel').onclick = closeSheet;
+}
+
+function openSegKindSheet(idx, r) {
+  openSheet(`<h3>Tipo da parada — ${esc(r.name)}</h3>
+    ${Object.entries(STOP_KINDS).map(([k, v]) =>
+      `<button class="opt" data-k="${k}"><b>${v.label}</b><br><span class="hint">${v.hint}</span></button>`).join('')}
+    <button class="btn ghost" id="skCancel">Cancelar</button>`);
+  $('#sheet').querySelectorAll('[data-k]').forEach(b => b.onclick = () =>
+    applySegEdit(idx, { state: 'stop', reason: r.name, kind: b.dataset.k, planned: false, stdMs: null }));
+  $('#skCancel').onclick = closeSheet;
+}
+
 /* registrar chegada da manutenção na parada atual (MTTA / MTTR) */
 function markMaintArrived() {
   const a = db.active;
@@ -680,6 +791,8 @@ function tick() {
   const elT = $('#tTotal'); if (elT) elT.textContent = fmtDur(t.total);
   const elS = $('#tState');
   if (elS && a.current) elS.textContent = fmtDur(Date.now() - a.current.start);
+  const csd = $('#curSegDur');
+  if (csd && a.current) csd.textContent = fmtDur(Date.now() - a.current.start);
   const sh = $('#stdHint');
   if (sh && a.current && a.current.stdMs) {
     const rem = a.current.stdMs - (Date.now() - a.current.start);
