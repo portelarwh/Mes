@@ -341,7 +341,7 @@
 /* =====================================================
    MES — Apontamento de produção, paradas e refugo
    ===================================================== */
-const APP_VERSION = '1.2.0';   // ⬅ suba a versão a cada atualização
+const APP_VERSION = '1.3.0';   // ⬅ suba a versão a cada atualização
 document.getElementById('verBadge').textContent = 'v' + APP_VERSION;
 
 const STATES = {
@@ -378,7 +378,7 @@ function load() {
     machines: [],
     reasons: [
       { id: uid(), name: 'Manutenção corretiva', desc: 'Intervenção técnica não programada', planned: false },
-      { id: uid(), name: 'Setup / Troca',        desc: 'Troca de produto, ferramenta ou lote', planned: true },
+      { id: uid(), name: 'Setup / Troca',        desc: 'Troca de produto, ferramenta ou lote', planned: true, stdMin: 10 },
       { id: uid(), name: 'Ajuste de processo',   desc: '', planned: false },
       { id: uid(), name: 'Falta de operador',    desc: '', planned: false },
       { id: uid(), name: 'Qualidade',            desc: 'Bloqueio ou inspeção de qualidade', planned: false },
@@ -520,6 +520,7 @@ function renderApontar() {
         <span class="tm" id="tState">${cur ? '' : '—'}</span>
       </div>
 
+      ${cur && cur.state === 'stop' && cur.planned && cur.stdMs ? '<p class="hint" id="stdHint" style="margin-top:8px"></p>' : ''}
       ${cur && cur.state === 'stop' && cur.kind && cur.kind !== 'op' ? (
         cur.maintAt
           ? `<p class="hint" style="margin-top:8px">🔧 Manutenção chegou às ${new Date(cur.maintAt).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'})} (atendimento em ${fmtDurLong(cur.maintAt - cur.start)}) — em reparo.</p>`
@@ -580,7 +581,7 @@ function startSession(machineId) {
 }
 
 /* trocar de estado: fecha o segmento atual (qualquer categoria interrompe a produção) */
-function setState(state, reason, kind, planned) {
+function setState(state, reason, kind, planned, stdMs) {
   const a = db.active; if (!a) return;
   const now = Date.now();
   if (a.current) {
@@ -588,7 +589,8 @@ function setState(state, reason, kind, planned) {
     a.segs.push({ ...a.current, end: now });
   }
   a.current = { state, reason: reason || null, kind: kind || null,
-    planned: planned === undefined ? null : !!planned, start: now };
+    planned: planned === undefined ? null : !!planned,
+    stdMs: stdMs > 0 ? stdMs : null, start: now };
   save(); render();
 }
 
@@ -597,12 +599,12 @@ const plannedBadge = p => `<span class="badge ${p ? 'planned' : 'unplanned'}">${
 function openReasonSheet() {
   openSheet(`<h3>Motivo da parada</h3>
     ${db.reasons.map((r, i) => `<button class="opt" data-r="${i}">
-      <b>${esc(r.name)}</b> ${plannedBadge(r.planned)}
+      <b>${esc(r.name)}</b> ${plannedBadge(r.planned)}${r.planned && r.stdMin > 0 ? ` <span class="hint">padrão ${r.stdMin}min</span>` : ''}
       ${r.desc ? `<br><span class="hint">${esc(r.desc)}</span>` : ''}</button>`).join('')}
     <button class="btn ghost" id="rCancel">Cancelar</button>`);
   $('#sheet').querySelectorAll('[data-r]').forEach(b => b.onclick = () => {
     const r = db.reasons[+b.dataset.r];
-    if (r.planned) { setState('stop', r.name, 'op', true); closeSheet(); } /* planejada não é falha/quebra */
+    if (r.planned) { setState('stop', r.name, 'op', true, (r.stdMin || 0) * 60000); closeSheet(); } /* planejada não é falha/quebra */
     else openKindSheet(r);
   });
   $('#rCancel').onclick = closeSheet;
@@ -678,6 +680,13 @@ function tick() {
   const elT = $('#tTotal'); if (elT) elT.textContent = fmtDur(t.total);
   const elS = $('#tState');
   if (elS && a.current) elS.textContent = fmtDur(Date.now() - a.current.start);
+  const sh = $('#stdHint');
+  if (sh && a.current && a.current.stdMs) {
+    const rem = a.current.stdMs - (Date.now() - a.current.start);
+    sh.innerHTML = rem >= 0
+      ? `⏱ Tempo padrão ${fmtDurLong(a.current.stdMs)} — resta <b>${fmtDur(rem)}</b> dentro do planejado`
+      : `⚠️ <b style="color:var(--bad)">Estourou o tempo padrão em ${fmtDur(-rem)}</b> — o excedente conta como não planejado`;
+  }
   const elTh = $('#theoV'); if (elTh) elTh.innerHTML = fmtInt(theoOf(a, m)) + ' <small>pçs</small>';
   const list = $('#timeList');
   if (list) list.innerHTML = STATE_ORDER.map(k => `
@@ -724,7 +733,8 @@ const targetOf = m => (m && m.oeeTarget > 0 ? m.oeeTarget : DEFAULT_OEE_TARGET);
 function aggregate(sessions) {
   const agg = { t: { prod: 0, stop: 0, idle: 0, wait: 0, total: 0 }, theo: 0, real: 0, scrap: 0,
     reasons: {}, nFinished: 0,
-    stopPlanned: 0, stopUnplanned: 0, nStopPlanned: 0, nStopUnplanned: 0 };
+    stopPlanned: 0, stopUnplanned: 0, stopExcess: 0,
+    nStopPlanned: 0, nStopUnplanned: 0, nStopExcess: 0 };
   for (const s of sessions) {
     const t = totals(s);
     for (const k of ['prod','stop','idle','wait','total']) agg.t[k] += t[k];
@@ -735,10 +745,17 @@ function aggregate(sessions) {
         const r = seg.reason || 'Sem motivo';
         const dur = (seg.end || Date.now()) - seg.start;
         const planned = seg.planned != null ? seg.planned : reasonPlannedByName(seg.reason);
-        const e = agg.reasons[r] || (agg.reasons[r] = { ms: 0, n: 0, plannedMs: 0 });
+        const e = agg.reasons[r] || (agg.reasons[r] = { ms: 0, n: 0, plannedMs: 0, excessMs: 0 });
         e.ms += dur; e.n++;
-        if (planned) { e.plannedMs += dur; agg.stopPlanned += dur; agg.nStopPlanned++; }
-        else { agg.stopUnplanned += dur; agg.nStopUnplanned++; }
+        if (planned) {
+          /* tempo padrão: o que passar dele conta como não planejado (variação operacional) */
+          const std = seg.stdMs > 0 ? seg.stdMs : null;
+          const pMs = std != null ? Math.min(dur, std) : dur;
+          const xMs = dur - pMs;
+          e.plannedMs += pMs; e.excessMs += xMs;
+          agg.stopPlanned += pMs; agg.stopExcess += xMs; agg.nStopPlanned++;
+          if (xMs > 0) agg.nStopExcess++;
+        } else { agg.stopUnplanned += dur; agg.nStopUnplanned++; }
       }
     }
   }
@@ -814,18 +831,26 @@ function renderDash() {
   let cum = 0;
   const bars = reasons.map(([r, e]) => {
     cum += e.ms;
-    const planned = e.plannedMs >= e.ms / 2;
+    const planned = e.plannedMs + e.excessMs >= e.ms / 2;
+    /* barra bicolor quando a parada planejada estourou o tempo padrão */
+    const pFrac = e.ms > 0 ? (e.plannedMs / e.ms * 100).toFixed(1) : 0;
+    const fillBg = planned
+      ? (e.excessMs > 0 ? `background:linear-gradient(90deg, var(--accent) ${pFrac}%, var(--bad) ${pFrac}%)` : 'background:var(--accent)')
+      : '';
     return `<div class="hbar">
       <div class="top"><span class="n">${esc(r)} ${plannedBadge(planned)}</span>
         <span class="v">${fmtDurLong(e.ms)} · ${pct(e.ms / stopTotal, 0)} <span style="color:var(--muted)">(acum. ${pct(cum / stopTotal, 0)})</span></span></div>
-      <div class="track"><div class="fill" style="width:${(e.ms / reasons[0][1].ms * 100).toFixed(1)}%${planned ? ';background:var(--accent)' : ''}"></div></div>
+      <div class="track"><div class="fill" style="width:${(e.ms / reasons[0][1].ms * 100).toFixed(1)}%;${fillBg}"></div></div>
+      ${e.excessMs > 0 ? `<div class="top" style="margin-top:2px"><span class="n" style="font-size:11px">└ estouro do tempo padrão</span><span class="v" style="font-size:11px;color:var(--bad)">+${fmtDurLong(e.excessMs)}</span></div>` : ''}
     </div>`;
   }).join('');
+  const unplannedTotal = agg.stopUnplanned + agg.stopExcess;
   const plannedSplit = agg.t.stop > 0 ? `
     <div class="kpi-row" style="margin-bottom:12px">
-      <div class="kpi"><div class="k">Não planejadas</div><div class="v" style="color:var(--bad)">${fmtDurLong(agg.stopUnplanned)}</div><div class="k">${agg.nStopUnplanned} evento(s)</div></div>
-      <div class="kpi"><div class="k">Planejadas</div><div class="v" style="color:var(--accent)">${fmtDurLong(agg.stopPlanned)}</div><div class="k">${agg.nStopPlanned} evento(s)</div></div>
-    </div>` : '';
+      <div class="kpi"><div class="k">Não planejadas</div><div class="v" style="color:var(--bad)">${fmtDurLong(unplannedTotal)}</div><div class="k">${agg.nStopUnplanned} evento(s)${agg.stopExcess > 0 ? ' + estouros' : ''}</div></div>
+      <div class="kpi"><div class="k">Planejadas (no padrão)</div><div class="v" style="color:var(--accent)">${fmtDurLong(agg.stopPlanned)}</div><div class="k">${agg.nStopPlanned} evento(s)</div></div>
+    </div>
+    ${agg.stopExcess > 0 ? `<p class="hint" style="margin-bottom:12px">⚠️ <b>${fmtDurLong(agg.stopExcess)}</b> de estouro sobre o tempo padrão em ${agg.nStopExcess} parada(s) planejada(s) — variação operacional, contabilizada como não planejada.</p>` : ''}` : '';
 
   /* por máquina */
   const machines = db.machines.filter(m => all.some(s => s.machineId === m.id));
@@ -976,7 +1001,7 @@ function renderMaq() {
       ${db.reasons.map((r, i) => `
         <div class="list-row">
           <div class="info"><div class="nm">${esc(r.name)} ${plannedBadge(r.planned)}</div>
-            <div class="sub">${esc(r.desc || 'sem descrição')}</div></div>
+            <div class="sub">${esc(r.desc || 'sem descrição')}${r.planned && r.stdMin > 0 ? ` · tempo padrão ${r.stdMin}min` : ''}</div></div>
           <div class="act"><button data-editr="${i}">✎</button><button data-delr="${i}" style="color:var(--bad)">✕</button></div>
         </div>`).join('')}
       <div style="height:12px"></div>
@@ -1032,12 +1057,16 @@ function openReasonEditSheet(idx) {
         <button class="btn ghost" id="rePlan">📅 Planejada</button>
         <button class="btn ghost" id="reUnplan">⚠️ Não planejada</button>
       </div></div>
+    <div class="field" id="stdField"><label for="reStd">Tempo padrão (minutos)</label>
+      <input id="reStd" type="number" inputmode="decimal" min="0" step="any" placeholder="Ex.: 2" value="${r.stdMin > 0 ? r.stdMin : ''}">
+      <span class="hint">O que passar do tempo padrão conta como <b>não planejado</b> — é a variação operacional. Deixe vazio para não limitar.</span></div>
     <button class="btn" id="reSave">Salvar</button>
     <button class="btn ghost" id="reCancel">Cancelar</button>`);
   let planned = !!r.planned;
   const paint = () => {
     $('#rePlan').style.cssText = planned ? 'background:var(--accent);color:var(--btn-ink)' : '';
     $('#reUnplan').style.cssText = planned ? '' : 'background:var(--bad);color:var(--btn-ink)';
+    $('#stdField').style.display = planned ? '' : 'none';
   };
   paint();
   $('#rePlan').onclick = () => { planned = true; paint(); };
@@ -1047,8 +1076,9 @@ function openReasonEditSheet(idx) {
     const name = $('#reName').value.trim();
     if (!name) { $('#reName').focus(); return; }
     const desc = $('#reDesc').value.trim();
-    if (idx != null) Object.assign(db.reasons[idx], { name, desc, planned });
-    else db.reasons.push({ id: uid(), name, desc, planned });
+    const stdMin = planned ? (parseFloat($('#reStd').value) > 0 ? parseFloat($('#reStd').value) : null) : null;
+    if (idx != null) Object.assign(db.reasons[idx], { name, desc, planned, stdMin });
+    else db.reasons.push({ id: uid(), name, desc, planned, stdMin });
     save(); closeSheet(); render();
   };
 }
@@ -1138,10 +1168,19 @@ function buildReportSVG(d) {
   reasons.slice(0, 5).forEach(([name, e], i) => {
     cum += e.ms;
     const ry = y1 + 58 + i * 34;
-    const planned = e.plannedMs >= e.ms / 2;
-    s += `<text x="408" y="${ry}" font-size="11.5" font-weight="700" fill="${C.ink}" font-family="${FONT}">${esc(tr(name, 22))} <tspan font-size="8.5" fill="${planned ? C.accent : C.bad}">${planned ? 'PLANEJADA' : 'NÃO PLANEJADA'}</tspan></text>`;
+    const planned = e.plannedMs + e.excessMs >= e.ms / 2;
+    s += `<text x="408" y="${ry}" font-size="11.5" font-weight="700" fill="${C.ink}" font-family="${FONT}">${esc(tr(name, 17))} <tspan font-size="8" fill="${planned ? C.accent : C.bad}">${planned ? 'PLAN.' : 'NÃO PLAN.'}</tspan></text>`;
     s += `<text x="${392 + 356 - 16}" y="${ry}" font-size="10.5" font-weight="700" fill="${C.ink}" text-anchor="end" font-family="${FONT}">${esc(fmtDurLong(e.ms))} · ${Math.round(e.ms / stopTotal * 100)}% <tspan fill="${C.muted}" font-weight="600">(Σ ${Math.round(cum / stopTotal * 100)}%)</tspan></text>`;
-    s += bar(408, ry + 7, 356 - 32, 6, e.ms / reasons[0][1].ms, planned ? C.accent : C.stop);
+    if (planned && e.excessMs > 0) {
+      /* barra bicolor: dentro do padrão (azul) + estouro (vermelho) */
+      const bw = (356 - 32) * e.ms / reasons[0][1].ms;
+      s += `<rect x="408" y="${ry + 7}" width="${356 - 32}" height="6" rx="3" fill="${C.track}"/>`;
+      s += `<rect x="408" y="${ry + 7}" width="${(bw * e.plannedMs / e.ms).toFixed(1)}" height="6" rx="3" fill="${C.accent}"/>`;
+      s += `<rect x="${(408 + bw * e.plannedMs / e.ms).toFixed(1)}" y="${ry + 7}" width="${(bw * e.excessMs / e.ms).toFixed(1)}" height="6" fill="${C.bad}"/>`;
+      s += txt(392 + 356 - 16, ry + 24, `+${fmtDurLong(e.excessMs)} de estouro do tempo padrão`, 8.5, 700, C.bad, 'end');
+    } else {
+      s += bar(408, ry + 7, 356 - 32, 6, e.ms / reasons[0][1].ms, planned ? C.accent : C.stop);
+    }
   });
   if (reasons.length > 5) {
     const rest = reasons.slice(5).reduce((t, r) => t + r[1].ms, 0);
@@ -1187,13 +1226,15 @@ function buildReportSVG(d) {
   s += card(764, y2, 335, h2, 'Paradas planejadas × não planejadas');
   const st = agg.t.stop || 1;
   [['Não planejada', agg.stopUnplanned, agg.nStopUnplanned, C.bad],
-   ['Planejada', agg.stopPlanned, agg.nStopPlanned, C.accent]].forEach(([lbl, ms, n, col], i) => {
-    const ry = y2 + 76 + i * 62;
-    s += txt(780, ry, lbl, 12, 700, C.ink);
-    s += txt(1083, ry, `${fmtDurLong(ms)} · ${Math.round(ms / st * 100)}% · ${n} evento(s)`, 11, 700, C.ink, 'end');
-    s += bar(780, ry + 8, 303, 8, ms / st, col);
+   ['Planejada (no padrão)', agg.stopPlanned, agg.nStopPlanned, C.accent],
+   ['Estouro do padrão', agg.stopExcess, agg.nStopExcess, '#eb6834']].forEach(([lbl, ms, n, col], i) => {
+    const ry = y2 + 68 + i * 44;
+    s += txt(780, ry, lbl, 11.5, 700, C.ink);
+    s += txt(1083, ry, `${fmtDurLong(ms)} · ${Math.round(ms / st * 100)}% · ${n} evento(s)`, 10, 700, C.ink, 'end');
+    s += bar(780, ry + 7, 303, 8, ms / st, col);
   });
-  s += txt(780, y2 + 196, 'Percentuais sobre o tempo total de paradas.', 9.5, 600, C.muted);
+  s += txt(780, y2 + 194, 'Estouro = tempo além do padrão em paradas planejadas;', 9, 600, C.muted);
+  s += txt(780, y2 + 205, 'conta como não planejado (variação operacional).', 9, 600, C.muted);
 
   /* ---- Por máquina ---- */
   s += card(24, y3, W - 48, h3, 'Por máquina');

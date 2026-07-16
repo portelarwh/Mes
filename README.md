@@ -41,7 +41,12 @@ Pages**: Settings → Pages → branch `main` → `/ (root)`.
    **PNG** (download direto) ou **PDF** (diálogo de impressão do navegador).
 
 Os **motivos de parada** são configuráveis na aba Máquinas: tipo (nome),
-descrição e classificação **planejada / não planejada**.
+descrição e classificação **planejada / não planejada**. Motivos planejados
+podem ter um **tempo padrão** (ex.: 2 min): se a parada real passar disso
+(ex.: 4 min), os 2 min do padrão contam como planejados e os 2 min restantes
+como **não planejados** — o **estouro**, que mede a variação operacional. O
+app avisa em tempo real quando a parada estoura o padrão, e o estouro aparece
+destacado no Dashboard e no relatório executivo.
 
 ## Cálculos
 
