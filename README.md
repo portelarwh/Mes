@@ -41,7 +41,14 @@ Pages**: Settings → Pages → branch `main` → `/ (root)`.
    manutenção (MTBF, MTBB, MTTA, MTTR), distribuição do tempo, principais
    motivos de parada (com split planejadas × não planejadas) e resumo por
    máquina, com filtro de período (hoje / 7 / 30 dias / tudo).
-5. **Relatório executivo** → botão no topo do Dashboard gera um relatório de
+5. **Manual** → digite os dados de um período já encerrado (tempo total,
+   paradas, ocioso, espera, produção entregue e refugo) e veja o OEE na hora,
+   com a barra "para onde foi o tempo": a diferença entre o teórico do tempo
+   operando e o entregue vira o tempo equivalente de **microparadas / espera /
+   ritmo reduzido não apontados**. Ex.: 60min, 10min de parada, 10 pçs/min,
+   400 entregues → caberiam 500; os 100 que faltam = 10min perdidos. Dá para
+   salvar o cálculo como apontamento no Dashboard.
+6. **Relatório executivo** → botão no topo do Dashboard gera um relatório de
    uma página (A4 paisagem) com OEE real, Pareto de paradas, produção,
    manutenção, distribuição do tempo e tabela por máquina — exportável em
    **PNG** (download direto) ou **PDF** (diálogo de impressão do navegador).

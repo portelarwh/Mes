@@ -107,7 +107,7 @@
   nav {
     position: fixed; bottom: 0; left: 0; right: 0; z-index: 20;
     max-width: 560px; margin: 0 auto;
-    display: grid; grid-template-columns: 1fr 1fr 1fr;
+    display: grid; grid-template-columns: repeat(4, 1fr);
     background: var(--surface); border-top: 1px solid var(--grid);
     padding-bottom: env(safe-area-inset-bottom);
   }
@@ -323,6 +323,9 @@
   <!-- ================= APONTAR ================= -->
   <section class="page" id="page-apontar"></section>
 
+  <!-- ================= MANUAL ================= -->
+  <section class="page" id="page-manual"></section>
+
   <!-- ================= DASHBOARD ================= -->
   <section class="page" id="page-dash"></section>
 
@@ -332,6 +335,7 @@
 
 <nav>
   <button data-tab="apontar" class="active"><span class="ico">⏱</span>Apontar</button>
+  <button data-tab="manual"><span class="ico">✎</span>Manual</button>
   <button data-tab="dash"><span class="ico">◔</span>Dashboard</button>
   <button data-tab="maq"><span class="ico">⚙</span>Máquinas</button>
 </nav>
@@ -352,7 +356,7 @@
 /* =====================================================
    MES — Apontamento de produção, paradas e refugo
    ===================================================== */
-const APP_VERSION = '1.4.0';   // ⬅ suba a versão a cada atualização
+const APP_VERSION = '1.5.0';   // ⬅ suba a versão a cada atualização
 document.getElementById('verBadge').textContent = 'v' + APP_VERSION;
 
 const STATES = {
@@ -484,7 +488,7 @@ document.querySelectorAll('nav button').forEach(b => {
   };
 });
 function showPage() {
-  for (const p of ['apontar', 'dash', 'maq'])
+  for (const p of ['apontar', 'manual', 'dash', 'maq'])
     $('#page-' + p).classList.toggle('visible', tab === p);
 }
 
@@ -810,6 +814,150 @@ function tick() {
 }
 
 /* =====================================================
+   MANUAL — OEE a partir de dados digitados
+   ===================================================== */
+function renderManual() {
+  const el = $('#page-manual');
+  const m = db.manual || {};
+  el.innerHTML = `
+    <div class="card">
+      <h2>Cálculo manual de OEE</h2>
+      <p class="hint" style="margin-bottom:12px">Digite os dados do período (sem cronômetro) e veja o OEE na hora. Ex.: em 60min você parou 10min, fez 400 pçs e 50 eram refugo.</p>
+      <div class="field"><label for="inMach">Máquina (para usar a capacidade cadastrada e poder salvar)</label>
+        <select id="inMach"><option value="">— sem máquina —</option>
+          ${db.machines.map(x => `<option value="${x.id}" ${m.machineId === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}
+        </select></div>
+      <div class="field"><label for="inRate">Capacidade nominal (peças por minuto)</label>
+        <input id="inRate" type="number" inputmode="decimal" min="0.01" step="any" placeholder="Ex.: 10" value="${m.rate ?? ''}"></div>
+      <div class="kpi-row" style="margin-bottom:12px">
+        <div class="field" style="margin:0"><label for="inTotal">Tempo total (min)</label>
+          <input id="inTotal" type="number" inputmode="decimal" min="1" step="any" placeholder="Ex.: 60" value="${m.total ?? ''}"></div>
+        <div class="field" style="margin:0"><label for="inStop">Paradas (min)</label>
+          <input id="inStop" type="number" inputmode="decimal" min="0" step="any" placeholder="Ex.: 10" value="${m.stop ?? ''}"></div>
+      </div>
+      <div class="kpi-row" style="margin-bottom:12px">
+        <div class="field" style="margin:0"><label for="inIdle">Ocioso — sem insumo (min)</label>
+          <input id="inIdle" type="number" inputmode="decimal" min="0" step="any" placeholder="0" value="${m.idle ?? ''}"></div>
+        <div class="field" style="margin:0"><label for="inWait">Esperando linha (min)</label>
+          <input id="inWait" type="number" inputmode="decimal" min="0" step="any" placeholder="0" value="${m.wait ?? ''}"></div>
+      </div>
+      <div class="kpi-row">
+        <div class="field" style="margin:0"><label for="inReal">Produção entregue (pçs)</label>
+          <input id="inReal" type="number" inputmode="numeric" min="0" placeholder="Ex.: 400" value="${m.real ?? ''}"></div>
+        <div class="field" style="margin:0"><label for="inScrap">Refugo (pçs)</label>
+          <input id="inScrap" type="number" inputmode="numeric" min="0" placeholder="Ex.: 50" value="${m.scrap ?? ''}"></div>
+      </div>
+    </div>
+    <div id="manualOut"></div>`;
+
+  const ids = ['inRate', 'inTotal', 'inStop', 'inIdle', 'inWait', 'inReal', 'inScrap'];
+  const readInputs = () => ({
+    machineId: $('#inMach').value || null,
+    rate: parseFloat($('#inRate').value),
+    total: parseFloat($('#inTotal').value),
+    stop: parseFloat($('#inStop').value) || 0,
+    idle: parseFloat($('#inIdle').value) || 0,
+    wait: parseFloat($('#inWait').value) || 0,
+    real: parseFloat($('#inReal').value),
+    scrap: parseFloat($('#inScrap').value) || 0,
+  });
+  const recalc = () => {
+    db.manual = readInputs(); save();
+    calcManual(db.manual);
+  };
+  ids.forEach(id => $('#' + id).oninput = recalc);
+  $('#inMach').onchange = () => {
+    const mm = machineById($('#inMach').value);
+    if (mm) $('#inRate').value = mm.rate;
+    recalc();
+  };
+  recalc();
+}
+
+function calcManual(v) {
+  const out = $('#manualOut'); if (!out) return;
+  const valid = v.rate > 0 && v.total > 0 && v.real >= 0 && !isNaN(v.real);
+  if (!valid) { out.innerHTML = '<div class="card"><p class="hint">Preencha capacidade, tempo total e produção entregue para calcular.</p></div>'; return; }
+  const down = v.stop + v.idle + v.wait;
+  if (down > v.total) { out.innerHTML = '<div class="card"><p class="hint">⚠️ Paradas + ocioso + espera não podem passar do tempo total.</p></div>'; return; }
+  const scrap = Math.min(v.scrap || 0, v.real);
+  const oper = v.total - down;              /* tempo operando */
+  const theo = v.rate * oper;               /* teórica no tempo operando */
+  const A = oper / v.total;
+  const P = theo > 0 ? v.real / theo : 0;
+  const Q = v.real > 0 ? (v.real - scrap) / v.real : 0;
+  const oee = A * P * Q;
+  const lostPcs = theo - v.real;            /* peças que faltaram */
+  const lostMin = lostPcs / v.rate;         /* tempo equivalente perdido */
+  const effMin = Math.min(oper, v.real / v.rate); /* tempo efetivo de produção */
+
+  const mm2 = machineById(v.machineId);
+  const target = mm2 ? targetOf(mm2) : DEFAULT_OEE_TARGET;
+  const okMeta = oee * 100 >= target;
+
+  /* barra: para onde foi o tempo */
+  const segsBar = [
+    ['Produção efetiva', effMin, 'var(--st-prod)'],
+    ['Microparadas / espera / ritmo (não apontado)', Math.max(0, lostMin), '#eb6834'],
+    ['Paradas', v.stop, 'var(--st-stop)'],
+    ['Ocioso', v.idle, 'var(--st-idle)'],
+    ['Esperando', v.wait, 'var(--st-wait)'],
+  ].filter(s => s[1] > 0.001);
+
+  out.innerHTML = `
+    <div class="card">
+      <h2>Resultado</h2>
+      <div class="gauge-grid">
+        <div class="gauge gauge-hero">${donutSVG(oee, 'OEE', 'OEE', okMeta ? 'var(--good)' : 'var(--bad)')}
+          <span class="glabel">OEE</span>
+          <span class="gmeta">meta ${target.toFixed(0)}% · ${okMeta ? '✓ atingida' : 'abaixo'}</span></div>
+        <div class="gauge">${donutSVG(A, 'Disponibilidade')}<span class="glabel">Disponibilidade</span></div>
+        <div class="gauge">${donutSVG(P, 'Performance')}<span class="glabel">Performance</span></div>
+        <div class="gauge">${donutSVG(Q, 'Qualidade')}<span class="glabel">Qualidade</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Para onde foi o tempo (${fmtInt(v.total)}min)</h2>
+      <div class="stackbar">${segsBar.map(s => `<div style="flex:${s[1]};background:${s[2]}" title="${s[0]}"></div>`).join('')}</div>
+      <div style="height:12px"></div>
+      <div class="time-list">
+        ${segsBar.map(s => `<div class="time-row"><span class="sw" style="background:${s[2]}"></span>
+          <span class="nm">${s[0]}</span><span class="tv">${s[1].toFixed(1).replace('.', ',')}min</span></div>`).join('')}
+      </div>
+      <p class="hint" style="margin-top:12px">
+        Operando ${fmtInt(oper)}min × ${v.rate} pçs/min = <b>${fmtInt(theo)} pçs teóricas</b>. Você entregou <b>${fmtInt(v.real)}</b>${scrap ? ` (${fmtInt(scrap)} de refugo)` : ''} —
+        ${lostPcs > 0.5
+          ? `faltaram <b>${fmtInt(lostPcs)} pçs</b>, o equivalente a <b class="diff-neg">${lostMin.toFixed(1).replace('.', ',')}min</b> de microparadas, espera, ociosidade ou ritmo reduzido que não foram apontados.`
+          : lostPcs < -0.5
+            ? `<b class="diff-pos">${fmtInt(-lostPcs)} pçs acima do teórico</b> — confira a capacidade nominal.`
+            : 'em linha com o teórico. 🎯'}
+      </p>
+    </div>
+    <div class="card">
+      <h2>Salvar</h2>
+      ${v.machineId
+        ? '<button class="btn" id="manualSave">💾 Salvar como apontamento no Dashboard</button><p class="hint" style="margin-top:8px">Entra no período atual com os tempos e a produção informados (a perda de performance permanece como performance).</p>'
+        : '<p class="hint">Escolha uma máquina acima para poder salvar este cálculo como apontamento.</p>'}
+    </div>`;
+
+  const sv = $('#manualSave');
+  if (sv) sv.onclick = () => {
+    const now = Date.now();
+    const min = 60000;
+    const start = now - v.total * min;
+    const segs = [];
+    let t = start;
+    const push = (state, dur) => { if (dur > 0) { segs.push({ state, reason: null, kind: null, planned: null, start: t, end: t + dur * min }); t += dur * min; } };
+    push('prod', oper); push('stop', v.stop); push('idle', v.idle); push('wait', v.wait);
+    db.sessions.push({ id: uid(), machineId: v.machineId, start, end: now, segs, theo, real: v.real, scrap, manual: true });
+    save();
+    tab = 'dash';
+    document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x.dataset.tab === 'dash'));
+    render();
+  };
+}
+
+/* =====================================================
    DASHBOARD
    ===================================================== */
 const PERIODS = { hoje: ['Hoje', 0], '7d': ['7 dias', 7], '30d': ['30 dias', 30], tudo: ['Tudo', null] };
@@ -1055,7 +1203,7 @@ function renderDash() {
         const m = machineById(s.machineId); const t = totals(s);
         return `<div class="list-row"><div class="info">
           <div class="nm">${esc(m ? m.name : '?')} — ${fmtInt(s.real)} pçs <span style="color:var(--muted);font-weight:400">(teo ${fmtInt(s.theo)})</span></div>
-          <div class="sub">${new Date(s.start).toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} · ${fmtDurLong(t.total)} · refugo ${fmtInt(s.scrap)}</div>
+          <div class="sub">${new Date(s.start).toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} · ${fmtDurLong(t.total)} · refugo ${fmtInt(s.scrap)}${s.manual ? ' · ✎ manual' : ''}</div>
         </div><div class="act"><button data-del-sess="${s.id}">✕</button></div></div>`;
       }).join('') || '<p class="hint">Nenhum apontamento finalizado.</p>'}
     </div>`;
@@ -1423,6 +1571,7 @@ $('#overlay').addEventListener('click', e => { if (e.target === e.currentTarget)
 function render() {
   showPage();
   if (tab === 'apontar') renderApontar();
+  if (tab === 'manual') renderManual();
   if (tab === 'dash') renderDash();
   if (tab === 'maq') renderMaq();
 }
