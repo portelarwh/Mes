@@ -356,7 +356,7 @@
 /* =====================================================
    MES — Apontamento de produção, paradas e refugo
    ===================================================== */
-const APP_VERSION = '1.5.0';   // ⬅ suba a versão a cada atualização
+const APP_VERSION = '1.6.0';   // ⬅ suba a versão a cada atualização
 document.getElementById('verBadge').textContent = 'v' + APP_VERSION;
 
 const STATES = {
@@ -684,34 +684,47 @@ function renderSegList(a) {
   return rows.join('');
 }
 
-function applySegEdit(idx, patch) {
-  const a = db.active; if (!a) return;
-  const seg = idx === 'cur' ? a.current : a.segs[idx];
+/* alvo do editor de marcação: apontamento ativo (padrão) ou uma sessão fechada (sessId) */
+function segTarget(idx, sessId) {
+  if (sessId) { const s = db.sessions.find(x => x.id === sessId); return s ? s.segs[idx] : null; }
+  const a = db.active; if (!a) return null;
+  return idx === 'cur' ? a.current : a.segs[idx];
+}
+
+function applySegEdit(idx, patch, sessId) {
+  const seg = segTarget(idx, sessId);
   if (!seg) return;
   Object.assign(seg, patch);
   if (seg.state !== 'stop') { seg.reason = null; seg.kind = null; seg.planned = null; seg.stdMs = null; delete seg.maintAt; }
   else if (!seg.kind || seg.kind === 'op') delete seg.maintAt;
-  save(); closeSheet(); render();
+  if (sessId) {
+    /* sessão fechada: recalcula a teórica, pois o tempo produzindo pode ter mudado */
+    const s = db.sessions.find(x => x.id === sessId);
+    const m = machineById(s.machineId);
+    s.theo = totals(s).prod / 60000 * (m ? m.rate : 0);
+  }
+  save();
+  if (sessId) { render(); openSessionEditSheet(sessId); }
+  else { closeSheet(); render(); }
 }
 
-function openSegEditSheet(idx) {
-  const a = db.active; if (!a) return;
-  const seg = idx === 'cur' ? a.current : a.segs[idx];
+function openSegEditSheet(idx, sessId) {
+  const seg = segTarget(idx, sessId);
   if (!seg) return;
   openSheet(`<h3>Corrigir marcação</h3>
-    <p class="hint">${esc(segLabel(seg))} · ${fmtHM(seg.start)}–${idx === 'cur' ? 'agora' : fmtHM(seg.end)}</p>
+    <p class="hint">${esc(segLabel(seg))} · ${fmtHM(seg.start)}–${!sessId && idx === 'cur' ? 'agora' : fmtHM(seg.end)}</p>
     ${STATE_ORDER.map(k => `<button class="opt" data-k="${k}" ${k === seg.state ? 'style="outline:2px solid var(--accent)"' : ''}>
       <b>${STATES[k].label}</b>${k === 'stop' ? '<br><span class="hint">escolhe o motivo em seguida</span>' : ''}</button>`).join('')}
     <button class="btn ghost" id="seCancel">Cancelar</button>`);
   $('#sheet').querySelectorAll('[data-k]').forEach(b => b.onclick = () => {
     const k = b.dataset.k;
-    if (k === 'stop') openSegReasonSheet(idx);
-    else applySegEdit(idx, { state: k });
+    if (k === 'stop') openSegReasonSheet(idx, sessId);
+    else applySegEdit(idx, { state: k }, sessId);
   });
-  $('#seCancel').onclick = closeSheet;
+  $('#seCancel').onclick = () => sessId ? openSessionEditSheet(sessId) : closeSheet();
 }
 
-function openSegReasonSheet(idx) {
+function openSegReasonSheet(idx, sessId) {
   openSheet(`<h3>Motivo da parada</h3>
     <button class="opt" data-r="none"><b>Sem motivo</b><br><span class="hint">definir depois</span></button>
     ${db.reasons.map((r, i) => `<button class="opt" data-r="${i}">
@@ -719,22 +732,75 @@ function openSegReasonSheet(idx) {
       ${r.desc ? `<br><span class="hint">${esc(r.desc)}</span>` : ''}</button>`).join('')}
     <button class="btn ghost" id="srCancel">Cancelar</button>`);
   $('#sheet').querySelectorAll('[data-r]').forEach(b => b.onclick = () => {
-    if (b.dataset.r === 'none') return applySegEdit(idx, { state: 'stop', reason: null, kind: null, planned: null, stdMs: null });
+    if (b.dataset.r === 'none') return applySegEdit(idx, { state: 'stop', reason: null, kind: null, planned: null, stdMs: null }, sessId);
     const r = db.reasons[+b.dataset.r];
-    if (r.planned) applySegEdit(idx, { state: 'stop', reason: r.name, kind: 'op', planned: true, stdMs: (r.stdMin || 0) * 60000 });
-    else openSegKindSheet(idx, r);
+    if (r.planned) applySegEdit(idx, { state: 'stop', reason: r.name, kind: 'op', planned: true, stdMs: (r.stdMin || 0) * 60000 }, sessId);
+    else openSegKindSheet(idx, r, sessId);
   });
-  $('#srCancel').onclick = closeSheet;
+  $('#srCancel').onclick = () => sessId ? openSessionEditSheet(sessId) : closeSheet();
 }
 
-function openSegKindSheet(idx, r) {
+function openSegKindSheet(idx, r, sessId) {
   openSheet(`<h3>Tipo da parada — ${esc(r.name)}</h3>
     ${Object.entries(STOP_KINDS).map(([k, v]) =>
       `<button class="opt" data-k="${k}"><b>${v.label}</b><br><span class="hint">${v.hint}</span></button>`).join('')}
     <button class="btn ghost" id="skCancel">Cancelar</button>`);
   $('#sheet').querySelectorAll('[data-k]').forEach(b => b.onclick = () =>
-    applySegEdit(idx, { state: 'stop', reason: r.name, kind: b.dataset.k, planned: false, stdMs: null }));
-  $('#skCancel').onclick = closeSheet;
+    applySegEdit(idx, { state: 'stop', reason: r.name, kind: b.dataset.k, planned: false, stdMs: null }, sessId));
+  $('#skCancel').onclick = () => sessId ? openSessionEditSheet(sessId) : closeSheet();
+}
+
+/* ---------- editar / reabrir apontamento fechado ---------- */
+function openSessionEditSheet(id) {
+  const s = db.sessions.find(x => x.id === id); if (!s) return;
+  const m = machineById(s.machineId);
+  const t = totals(s);
+  openSheet(`<h3>Editar apontamento — ${esc(m ? m.name : '?')}</h3>
+    <p class="hint">${new Date(s.start).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+      · ${fmtDurLong(t.total)} · teórica ${fmtInt(s.theo)} pçs${s.manual ? ' · ✎ manual' : ''}</p>
+    <div class="kpi-row">
+      <div class="field" style="margin:0"><label for="eReal">Produção real (pçs)</label>
+        <input id="eReal" type="number" inputmode="numeric" min="0" value="${s.real}"></div>
+      <div class="field" style="margin:0"><label for="eScrap">Refugo (pçs)</label>
+        <input id="eScrap" type="number" inputmode="numeric" min="0" value="${s.scrap}"></div>
+    </div>
+    <button class="btn" id="eSave">Salvar produção / refugo</button>
+    <h3 style="font-size:14px;margin-top:4px">Marcações — toque em ✎ para corrigir</h3>
+    ${s.segs.map((seg, i) => `
+      <div class="list-row">
+        <span class="sw" style="background:${STATES[seg.state].color}"></span>
+        <div class="info"><div class="nm" style="font-size:13px">${esc(segLabel(seg))}
+          ${seg.state === 'stop' && seg.planned != null ? plannedBadge(seg.planned) : ''}</div>
+          <div class="sub">${fmtHM(seg.start)}–${fmtHM(seg.end)} · ${fmtDur(seg.end - seg.start)}</div></div>
+        <div class="act"><button data-editseg2="${i}">✎</button></div>
+      </div>`).join('')}
+    ${db.active
+      ? '<p class="hint">Para reabrir este apontamento e voltar a medir, finalize ou descarte antes o apontamento em andamento.</p>'
+      : '<button class="btn ghost" id="eReopen">🔓 Reabrir apontamento (voltar a medir)</button>'}
+    <button class="btn ghost" id="eClose">Fechar</button>`);
+  $('#eSave').onclick = () => {
+    const real = Math.max(0, +$('#eReal').value || 0);
+    s.real = real;
+    s.scrap = Math.min(real, Math.max(0, +$('#eScrap').value || 0));
+    save(); render(); openSessionEditSheet(id);
+  };
+  $('#sheet').querySelectorAll('[data-editseg2]').forEach(b => b.onclick = () => openSegEditSheet(+b.dataset.editseg2, id));
+  const rb = $('#eReopen'); if (rb) rb.onclick = () => reopenSession(id);
+  $('#eClose').onclick = closeSheet;
+}
+
+function reopenSession(id) {
+  if (db.active) return; /* só sem apontamento em andamento */
+  const i = db.sessions.findIndex(x => x.id === id); if (i < 0) return;
+  const s = db.sessions.splice(i, 1)[0];
+  /* volta a ser o apontamento ativo; o intervalo fechado→reaberto não conta em nenhum tempo
+     (os tempos são somados só dos segmentos marcados) */
+  db.active = { id: s.id, machineId: s.machineId, start: s.start, segs: s.segs, current: null,
+    prevReal: s.real, prevScrap: s.scrap, manual: s.manual || undefined };
+  save(); closeSheet();
+  tab = 'apontar';
+  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x.dataset.tab === 'apontar'));
+  render();
 }
 
 /* registrar chegada da manutenção na parada atual (MTTA / MTTR) */
@@ -754,9 +820,9 @@ function openFinishSheet() {
     <div class="kpi"><div class="k">Produção teórica (${fmtDurLong(totals(a).prod)} produzindo)</div>
       <div class="v">${fmtInt(theo)} <small>pçs</small></div></div>
     <div class="field"><label for="fReal">Produção real (peças contadas)</label>
-      <input id="fReal" type="number" inputmode="numeric" min="0" placeholder="0"></div>
+      <input id="fReal" type="number" inputmode="numeric" min="0" placeholder="0" value="${a.prevReal != null ? a.prevReal : ''}"></div>
     <div class="field"><label for="fScrap">Refugo (peças ruins, dentro do total real)</label>
-      <input id="fScrap" type="number" inputmode="numeric" min="0" value="0"></div>
+      <input id="fScrap" type="number" inputmode="numeric" min="0" value="${a.prevScrap != null ? a.prevScrap : 0}"></div>
     <div class="hint" id="fPreview"></div>
     <button class="btn" id="fSave">Salvar apontamento</button>
     <button class="btn ghost" id="fBack">Voltar</button>`);
@@ -768,6 +834,7 @@ function openFinishSheet() {
       : '';
   };
   $('#fReal').oninput = upd;
+  upd();
   $('#fBack').onclick = closeSheet;
   $('#fSave').onclick = () => {
     const real = Math.max(0, +$('#fReal').value || 0);
@@ -777,6 +844,7 @@ function openFinishSheet() {
     db.sessions.push({
       id: a.id, machineId: a.machineId, start: a.start, end: now,
       segs, theo: theoOf(a, m, now), real, scrap,
+      ...(a.manual ? { manual: true } : {}),
     });
     db.active = null; save(); closeSheet();
     tab = 'dash';
@@ -1204,12 +1272,14 @@ function renderDash() {
         return `<div class="list-row"><div class="info">
           <div class="nm">${esc(m ? m.name : '?')} — ${fmtInt(s.real)} pçs <span style="color:var(--muted);font-weight:400">(teo ${fmtInt(s.theo)})</span></div>
           <div class="sub">${new Date(s.start).toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} · ${fmtDurLong(t.total)} · refugo ${fmtInt(s.scrap)}${s.manual ? ' · ✎ manual' : ''}</div>
-        </div><div class="act"><button data-del-sess="${s.id}">✕</button></div></div>`;
+        </div><div class="act"><button data-edit-sess="${s.id}">✎</button><button data-del-sess="${s.id}" style="color:var(--bad)">✕</button></div></div>`;
       }).join('') || '<p class="hint">Nenhum apontamento finalizado.</p>'}
+      <p class="hint" style="margin-top:8px">Toque em ✎ para editar um apontamento fechado — corrigir marcações, produção e refugo, ou reabri-lo para voltar a medir.</p>
     </div>`;
 
   bindChips(el);
   $('#repBtn').onclick = openReport;
+  el.querySelectorAll('[data-edit-sess]').forEach(b => b.onclick = () => openSessionEditSheet(b.dataset.editSess));
   el.querySelectorAll('[data-del-sess]').forEach(b => b.onclick = () => {
     openSheet(`<h3>Excluir este apontamento?</h3>
       <button class="btn danger" id="dsY">Sim, excluir</button><button class="btn ghost" id="dsN">Voltar</button>`);

@@ -36,6 +36,9 @@ Pages**: Settings → Pages → branch `main` → `/ (root)`.
    interrompe a produção. Os 4 cronômetros acumulam em tempo real.
 3. **Finalizar** → informe a **produção real** contada e o **refugo**. O app
    mostra a diferença real × teórica e salva o apontamento.
+   Um apontamento **fechado** pode ser editado depois pelo botão ✎ na lista
+   do Dashboard: corrigir marcações, produção e refugo, ou **reabrir** para
+   voltar a medir (o intervalo fechado→reaberto não conta em nenhum tempo).
 4. **Dashboard** → OEE (gauge **verde se ≥ meta, vermelho se abaixo**),
    Disponibilidade, Performance e Qualidade lado a lado, indicadores de
    manutenção (MTBF, MTBB, MTTA, MTTR), distribuição do tempo, principais
