@@ -135,6 +135,9 @@
   .now-state.none { background: var(--track); color: var(--ink-2); }
 
   .state-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 899px) {
+    div[style*="grid-auto-flow:column"] { grid-auto-flow: row !important; }
+  }
   .state-btn {
     border-radius: 14px; padding: 16px 12px; min-height: 76px;
     display: grid; gap: 3px; justify-items: center; align-content: center;
@@ -151,6 +154,17 @@
   @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .state-btn.wait { color: #221a00; } }
   .state-btn.current { border-color: var(--ink); box-shadow: 0 0 0 3px var(--ring); }
   .state-btn:active { transform: scale(.97); }
+  .state-btn .acc {
+    font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums;
+    opacity: .95; margin-top: 2px; letter-spacing: .01em;
+  }
+
+  .pick-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pick {
+    padding: 8px 12px; border-radius: 999px; border: 1px solid var(--baseline);
+    background: var(--page); font-size: 13px; font-weight: 600; color: var(--ink-2);
+  }
+  .pick.on { background: var(--accent); border-color: var(--accent); color: var(--btn-ink); }
 
   .kpi-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .kpi {
@@ -270,6 +284,44 @@
   .empty { text-align: center; padding: 26px 10px; color: var(--muted); font-size: 13.5px; line-height: 1.5; }
   .empty .big { font-size: 34px; margin-bottom: 8px; }
 
+  /* ============ Desktop ============ */
+  header .desknav { display: none; }
+  @media (min-width: 900px) {
+    body { max-width: none; padding: 0 0 40px; }
+    header {
+      max-width: 1280px; margin: 0 auto; padding: 14px 28px;
+      border-bottom: 1px solid var(--grid);
+    }
+    header h1 { font-size: 20px; flex: none; margin-right: 8px; }
+    header .desknav { display: flex; gap: 4px; flex: 1; }
+    header .desknav button {
+      padding: 8px 14px; border-radius: 10px; font-size: 14px; font-weight: 700; color: var(--ink-2);
+    }
+    header .desknav button.active { background: var(--accent-soft); color: var(--accent); }
+    main { max-width: 1280px; margin: 0 auto; padding: 20px 28px; }
+    nav { display: none; }
+    .page.visible {
+      display: grid; gap: 18px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      align-items: start;
+    }
+    .page.visible > .card:first-child, .page.visible > .wide { grid-column: 1 / -1; }
+    .state-grid { grid-template-columns: repeat(4, 1fr); }
+    .state-btn { min-height: 92px; font-size: 16px; }
+    .gauge-grid { grid-template-columns: repeat(5, 1fr); align-items: start; }
+    .gauge-hero { grid-column: auto; }
+    .gauge svg { max-width: 116px; }
+    .gauge-hero svg { max-width: 146px; }
+    .kpi-row { grid-template-columns: repeat(2, 1fr); }
+    .sheet { border-radius: 18px; max-width: 620px; margin-bottom: 4vh; }
+    .overlay { align-items: center; }
+    .report-scroll svg { max-width: 1123px; }
+  }
+  @media (min-width: 1280px) {
+    .page.visible { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .page.visible > .span2 { grid-column: span 2; }
+  }
+
   .diff-pos { color: var(--good); }
   .diff-neg { color: var(--bad); }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
@@ -314,6 +366,12 @@
 
 <header>
   <h1>MES</h1>
+  <div class="desknav">
+    <button data-tab="apontar" class="active">⏱ Apontar</button>
+    <button data-tab="manual">✎ Manual</button>
+    <button data-tab="dash">◔ Dashboard</button>
+    <button data-tab="maq">⚙ Máquinas</button>
+  </div>
   <span class="wake" id="wakeInd" title="Tela sempre acesa"><span class="dot"></span>tela</span>
   <button class="icon-btn" id="themeBtn" aria-label="Alternar tema">◐</button>
   <span class="ver" id="verBadge">v0.0.0</span>
@@ -356,7 +414,7 @@
 /* =====================================================
    MES — Apontamento de produção, paradas e refugo
    ===================================================== */
-const APP_VERSION = '1.6.0';   // ⬅ suba a versão a cada atualização
+const APP_VERSION = '2.0.0';   // ⬅ suba a versão a cada atualização
 document.getElementById('verBadge').textContent = 'v' + APP_VERSION;
 
 const STATES = {
@@ -386,6 +444,8 @@ function load() {
       if (d.reasons && d.reasons.length && typeof d.reasons[0] === 'string') {
         d.reasons = d.reasons.map(n => ({ id: uid(), name: n, desc: '', planned: /setup|troca|limpeza/i.test(n) }));
       }
+      /* v2.0: configuração de cálculo (espera/ociosidade contam como parada da máquina?) */
+      if (!d.calc) d.calc = { idleCountsAsStop: false, waitCountsAsStop: false };
       return d;
     }
   } catch (e) {}
@@ -405,10 +465,19 @@ function load() {
     theme: null,
     period: '7d',
     askDetail: true, /* pedir motivo ao marcar parada (false = parada simples, detalhar depois) */
+    calc: { idleCountsAsStop: false, waitCountsAsStop: false },
   };
 }
 function save() { localStorage.setItem(KEY, JSON.stringify(db)); }
 const reasonPlannedByName = n => { const r = db.reasons.find(x => x.name === n); return r ? !!r.planned : false; };
+/* motivos aplicáveis a uma máquina — machineIds vazio/ausente = todas as máquinas */
+const reasonsFor = machineId => db.reasons.filter(r =>
+  !r.machineIds || !r.machineIds.length || (machineId && r.machineIds.includes(machineId)));
+const reasonScopeLabel = r => {
+  if (!r.machineIds || !r.machineIds.length) return 'todas as máquinas';
+  const names = r.machineIds.map(id => { const m = machineById(id); return m ? m.name : null; }).filter(Boolean);
+  return names.length ? names.join(', ') : 'máquina removida';
+};
 
 /* ---------- tema ---------- */
 function applyTheme() {
@@ -480,13 +549,13 @@ const machineById = id => db.machines.find(m => m.id === id);
    TABS
    ===================================================== */
 let tab = 'apontar';
-document.querySelectorAll('nav button').forEach(b => {
-  b.onclick = () => {
-    tab = b.dataset.tab;
-    document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x === b));
-    render();
-  };
-});
+const tabButtons = () => document.querySelectorAll('nav button, header .desknav button');
+function goTab(t) {
+  tab = t;
+  tabButtons().forEach(x => x.classList.toggle('active', x.dataset.tab === t));
+  render();
+}
+tabButtons().forEach(b => { b.onclick = () => goTab(b.dataset.tab); });
 function showPage() {
   for (const p of ['apontar', 'manual', 'dash', 'maq'])
     $('#page-' + p).classList.toggle('visible', tab === p);
@@ -550,6 +619,7 @@ function renderApontar() {
         ${STATE_ORDER.map(k => `
           <button class="state-btn ${STATES[k].cls} ${cur && cur.state === k ? 'current' : ''}" data-state="${k}">
             ${STATES[k].btn}<small>${STATES[k].sub}</small>
+            <small class="acc" id="acc-${k}">0:00</small>
           </button>`).join('')}
       </div>
       <div class="toggle-row">
@@ -564,7 +634,21 @@ function renderApontar() {
         <div class="kpi"><div class="k">Contagem teórica</div><div class="v" id="theoV">0 <small>pçs</small></div></div>
         <div class="kpi"><div class="k">Ritmo nominal</div><div class="v">${fmtInt(m ? m.rate : 0)} <small>pçs/min</small></div></div>
       </div>
-      <p class="hint" style="margin-top:10px">A contagem teórica sobe apenas enquanto o estado é <b>Produção</b>. Ao finalizar, informe a produção real e o refugo para ver a diferença.</p>
+      <div class="kpi-row" style="margin-top:10px">
+        <div class="field" style="margin:0"><label for="pReal">Produção parcial (pçs)</label>
+          <input id="pReal" type="number" inputmode="numeric" min="0" placeholder="opcional" value="${a.partialReal != null ? a.partialReal : ''}"></div>
+        <div class="field" style="margin:0"><label for="pScrap">Refugo parcial (pçs)</label>
+          <input id="pScrap" type="number" inputmode="numeric" min="0" placeholder="0" value="${a.partialScrap != null ? a.partialScrap : ''}"></div>
+      </div>
+      <div class="kpi-row" style="margin-top:10px">
+        <div class="kpi"><div class="k">Média real</div><div class="v" id="avgV">— <small>pçs/min</small></div></div>
+        <div class="kpi"><div class="k">Microparadas</div><div class="v" id="microV">—</div></div>
+      </div>
+      <div class="kpi-row" style="margin-top:10px">
+        <div class="kpi"><div class="k">OEE parcial — real (linha)</div><div class="v" id="oeeRealV">—</div></div>
+        <div class="kpi"><div class="k">OEE parcial — máquina</div><div class="v" id="oeeMachV">—</div></div>
+      </div>
+      <p class="hint" style="margin-top:10px" id="prodHint">Informe a produção parcial a qualquer momento para acompanhar média, microparadas e OEE ao vivo. A contagem teórica sobe apenas em <b>Produção</b>.</p>
     </div>
 
     <div class="card">
@@ -579,7 +663,7 @@ function renderApontar() {
         : '<p class="hint">Nada marcado ainda.</p>'}
     </div>
 
-    <div style="display:grid;gap:10px">
+    <div class="wide" style="display:grid;gap:10px;grid-auto-flow:column">
       <button class="btn" id="finishBtn">✓ Finalizar e apontar produção real</button>
       <button class="btn ghost" id="cancelBtn">Descartar apontamento</button>
     </div>`;
@@ -592,6 +676,14 @@ function renderApontar() {
     };
   });
   $('#detailToggle').onchange = e => { db.askDetail = e.target.checked; save(); };
+  const savePartial = () => {
+    const r = parseFloat($('#pReal').value), s = parseFloat($('#pScrap').value);
+    a.partialReal = r >= 0 ? r : null;
+    a.partialScrap = s >= 0 ? s : null;
+    save(); tick();
+  };
+  $('#pReal').oninput = savePartial;
+  $('#pScrap').oninput = savePartial;
   const db_ = $('#detailBtn'); if (db_) db_.onclick = () => openSegReasonSheet('cur');
   el.querySelectorAll('[data-editseg]').forEach(b => b.onclick = () => {
     const v = b.dataset.editseg;
@@ -632,13 +724,15 @@ function setState(state, reason, kind, planned, stdMs) {
 const plannedBadge = p => `<span class="badge ${p ? 'planned' : 'unplanned'}">${p ? 'planejada' : 'não planejada'}</span>`;
 
 function openReasonSheet() {
+  const list = reasonsFor(db.active ? db.active.machineId : null);
   openSheet(`<h3>Motivo da parada</h3>
-    ${db.reasons.map((r, i) => `<button class="opt" data-r="${i}">
+    ${list.length ? list.map(r => `<button class="opt" data-r="${r.id}">
       <b>${esc(r.name)}</b> ${plannedBadge(r.planned)}${r.planned && r.stdMin > 0 ? ` <span class="hint">padrão ${r.stdMin}min</span>` : ''}
-      ${r.desc ? `<br><span class="hint">${esc(r.desc)}</span>` : ''}</button>`).join('')}
+      ${r.desc ? `<br><span class="hint">${esc(r.desc)}</span>` : ''}</button>`).join('')
+      : '<p class="hint">Nenhum motivo cadastrado para esta máquina. Cadastre em Máquinas → Motivos de parada.</p>'}
     <button class="btn ghost" id="rCancel">Cancelar</button>`);
   $('#sheet').querySelectorAll('[data-r]').forEach(b => b.onclick = () => {
-    const r = db.reasons[+b.dataset.r];
+    const r = db.reasons.find(x => x.id === b.dataset.r);
     if (r.planned) { setState('stop', r.name, 'op', true, (r.stdMin || 0) * 60000); closeSheet(); } /* planejada não é falha/quebra */
     else openKindSheet(r);
   });
@@ -725,15 +819,16 @@ function openSegEditSheet(idx, sessId) {
 }
 
 function openSegReasonSheet(idx, sessId) {
+  const mid = sessId ? (db.sessions.find(x => x.id === sessId) || {}).machineId : (db.active || {}).machineId;
   openSheet(`<h3>Motivo da parada</h3>
     <button class="opt" data-r="none"><b>Sem motivo</b><br><span class="hint">definir depois</span></button>
-    ${db.reasons.map((r, i) => `<button class="opt" data-r="${i}">
+    ${reasonsFor(mid).map(r => `<button class="opt" data-r="${r.id}">
       <b>${esc(r.name)}</b> ${plannedBadge(r.planned)}${r.planned && r.stdMin > 0 ? ` <span class="hint">padrão ${r.stdMin}min</span>` : ''}
       ${r.desc ? `<br><span class="hint">${esc(r.desc)}</span>` : ''}</button>`).join('')}
     <button class="btn ghost" id="srCancel">Cancelar</button>`);
   $('#sheet').querySelectorAll('[data-r]').forEach(b => b.onclick = () => {
     if (b.dataset.r === 'none') return applySegEdit(idx, { state: 'stop', reason: null, kind: null, planned: null, stdMs: null }, sessId);
-    const r = db.reasons[+b.dataset.r];
+    const r = db.reasons.find(x => x.id === b.dataset.r);
     if (r.planned) applySegEdit(idx, { state: 'stop', reason: r.name, kind: 'op', planned: true, stdMs: (r.stdMin || 0) * 60000 }, sessId);
     else openSegKindSheet(idx, r, sessId);
   });
@@ -798,9 +893,7 @@ function reopenSession(id) {
   db.active = { id: s.id, machineId: s.machineId, start: s.start, segs: s.segs, current: null,
     prevReal: s.real, prevScrap: s.scrap, manual: s.manual || undefined };
   save(); closeSheet();
-  tab = 'apontar';
-  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x.dataset.tab === 'apontar'));
-  render();
+  goTab('apontar');
 }
 
 /* registrar chegada da manutenção na parada atual (MTTA / MTTR) */
@@ -820,9 +913,9 @@ function openFinishSheet() {
     <div class="kpi"><div class="k">Produção teórica (${fmtDurLong(totals(a).prod)} produzindo)</div>
       <div class="v">${fmtInt(theo)} <small>pçs</small></div></div>
     <div class="field"><label for="fReal">Produção real (peças contadas)</label>
-      <input id="fReal" type="number" inputmode="numeric" min="0" placeholder="0" value="${a.prevReal != null ? a.prevReal : ''}"></div>
+      <input id="fReal" type="number" inputmode="numeric" min="0" placeholder="0" value="${a.prevReal != null ? a.prevReal : (a.partialReal != null ? a.partialReal : '')}"></div>
     <div class="field"><label for="fScrap">Refugo (peças ruins, dentro do total real)</label>
-      <input id="fScrap" type="number" inputmode="numeric" min="0" value="${a.prevScrap != null ? a.prevScrap : 0}"></div>
+      <input id="fScrap" type="number" inputmode="numeric" min="0" value="${a.prevScrap != null ? a.prevScrap : (a.partialScrap != null ? a.partialScrap : 0)}"></div>
     <div class="hint" id="fPreview"></div>
     <button class="btn" id="fSave">Salvar apontamento</button>
     <button class="btn ghost" id="fBack">Voltar</button>`);
@@ -847,9 +940,7 @@ function openFinishSheet() {
       ...(a.manual ? { manual: true } : {}),
     });
     db.active = null; save(); closeSheet();
-    tab = 'dash';
-    document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x.dataset.tab === 'dash'));
-    render();
+    goTab('dash');
   };
 }
 
@@ -872,13 +963,40 @@ function tick() {
       ? `⏱ Tempo padrão ${fmtDurLong(a.current.stdMs)} — resta <b>${fmtDur(rem)}</b> dentro do planejado`
       : `⚠️ <b style="color:var(--bad)">Estourou o tempo padrão em ${fmtDur(-rem)}</b> — o excedente conta como não planejado`;
   }
-  const elTh = $('#theoV'); if (elTh) elTh.innerHTML = fmtInt(theoOf(a, m)) + ' <small>pçs</small>';
+  const theo = theoOf(a, m);
+  const elTh = $('#theoV'); if (elTh) elTh.innerHTML = fmtInt(theo) + ' <small>pçs</small>';
+
+  /* tempo somado por estado, embaixo de cada botão */
+  STATE_ORDER.forEach(k => { const e = $('#acc-' + k); if (e) e.textContent = fmtDur(t[k]); });
+
+  /* média real, microparadas e OEE parcial (real × máquina) a partir da produção parcial */
+  const pr = a.partialReal, ps = Math.min(a.partialScrap || 0, pr || 0);
+  const o = oeeOf({ t, theo, real: pr || 0, scrap: ps, nFinished: pr > 0 ? 1 : 0 }, { real: pr != null ? pr : undefined, scrap: ps });
+  const set = (id, html) => { const e = $(id); if (e) e.innerHTML = html; };
+  if (pr > 0) {
+    const avg = t.prod > 0 ? pr / (t.prod / 60000) : 0;
+    set('#avgV', fmtInt(avg) + ' <small>pçs/min</small>');
+    set('#microV', o.microMs != null ? `<span style="color:var(--bad)">${fmtDur(o.microMs)}</span>` : '—');
+    set('#oeeRealV', o.oee != null ? pct(o.oee) : '—');
+    set('#oeeMachV', o.oeeM != null ? pct(o.oeeM) : '—');
+    const hint = $('#prodHint');
+    if (hint) hint.innerHTML = `Para ${fmtInt(pr)} pçs a ${fmtInt(m ? m.rate : 0)} pçs/min bastariam <b>${fmtDur(o.effMs)}</b> — os outros <b class="diff-neg">${fmtDur(o.microMs)}</b> de tempo produzindo viraram microparadas ou ritmo reduzido.`;
+  } else {
+    set('#avgV', '— <small>pçs/min</small>'); set('#microV', '—');
+    set('#oeeRealV', '—'); set('#oeeMachV', '—');
+  }
+
   const list = $('#timeList');
-  if (list) list.innerHTML = STATE_ORDER.map(k => `
-    <div class="time-row"><span class="sw" style="background:${STATES[k].color}"></span>
-      <span class="nm">${STATES[k].label}</span><span class="tv">${fmtDur(t[k])}</span></div>`).join('') +
-    `<div class="time-row" style="border-top:1px solid var(--grid);padding-top:8px">
-      <span class="sw" style="background:transparent"></span><span class="nm"><b>Total</b></span><span class="tv">${fmtDur(t.total)}</span></div>`;
+  if (list) {
+    const c = calcCfg();
+    const off = k => (k === 'idle' && !c.idleCountsAsStop) || (k === 'wait' && !c.waitCountsAsStop);
+    list.innerHTML = STATE_ORDER.map(k => `
+      <div class="time-row"><span class="sw" style="background:${STATES[k].color}"></span>
+        <span class="nm">${STATES[k].label}${off(k) ? ' <span class="badge planned">fora do OEE da máquina</span>' : ''}</span>
+        <span class="tv">${fmtDur(t[k])}</span></div>`).join('') +
+      `<div class="time-row" style="border-top:1px solid var(--grid);padding-top:8px">
+        <span class="sw" style="background:transparent"></span><span class="nm"><b>Total</b></span><span class="tv">${fmtDur(t.total)}</span></div>`;
+  }
 }
 
 /* =====================================================
@@ -951,10 +1069,15 @@ function calcManual(v) {
   const scrap = Math.min(v.scrap || 0, v.real);
   const oper = v.total - down;              /* tempo operando */
   const theo = v.rate * oper;               /* teórica no tempo operando */
+  const cfg = calcCfg();
+  const outMin = (cfg.idleCountsAsStop ? 0 : v.idle) + (cfg.waitCountsAsStop ? 0 : v.wait);
+  const baseMach = Math.max(0.0001, v.total - outMin);
   const A = oper / v.total;
+  const Am = oper / baseMach;
   const P = theo > 0 ? v.real / theo : 0;
   const Q = v.real > 0 ? (v.real - scrap) / v.real : 0;
   const oee = A * P * Q;
+  const oeeM = Am * P * Q;
   const lostPcs = theo - v.real;            /* peças que faltaram */
   const lostMin = lostPcs / v.rate;         /* tempo equivalente perdido */
   const effMin = Math.min(oper, v.real / v.rate); /* tempo efetivo de produção */
@@ -976,10 +1099,14 @@ function calcManual(v) {
     <div class="card">
       <h2>Resultado</h2>
       <div class="gauge-grid">
-        <div class="gauge gauge-hero">${donutSVG(oee, 'OEE', 'OEE', okMeta ? 'var(--good)' : 'var(--bad)')}
-          <span class="glabel">OEE</span>
-          <span class="gmeta">meta ${target.toFixed(0)}% · ${okMeta ? '✓ atingida' : 'abaixo'}</span></div>
-        <div class="gauge">${donutSVG(A, 'Disponibilidade')}<span class="glabel">Disponibilidade</span></div>
+        <div class="gauge gauge-hero">${donutSVG(oeeM, 'OEE máquina', 'MÁQUINA', oeeM * 100 >= target ? 'var(--good)' : 'var(--bad)')}
+          <span class="glabel">OEE da máquina</span>
+          <span class="gmeta">meta ${target.toFixed(0)}% · ${oeeM * 100 >= target ? '✓ atingida' : 'abaixo'}</span></div>
+        <div class="gauge gauge-hero">${donutSVG(oee, 'OEE real', 'REAL', okMeta ? 'var(--good)' : 'var(--bad)')}
+          <span class="glabel">OEE real (linha)</span>
+          <span class="gmeta">${outMin > 0 ? `inclui ${fmtInt(outMin)}min de fora` : 'toda a janela'}</span></div>
+        <div class="gauge">${donutSVG(Am, 'Disponibilidade da máquina')}<span class="glabel">Disp. máquina</span>
+          <span class="gmeta">real ${pct(A, 0)}</span></div>
         <div class="gauge">${donutSVG(P, 'Performance')}<span class="glabel">Performance</span></div>
         <div class="gauge">${donutSVG(Q, 'Qualidade')}<span class="glabel">Qualidade</span></div>
       </div>
@@ -1019,9 +1146,7 @@ function calcManual(v) {
     push('prod', oper); push('stop', v.stop); push('idle', v.idle); push('wait', v.wait);
     db.sessions.push({ id: uid(), machineId: v.machineId, start, end: now, segs, theo, real: v.real, scrap, manual: true });
     save();
-    tab = 'dash';
-    document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x.dataset.tab === 'dash'));
-    render();
+    goTab('dash');
   };
 }
 
@@ -1119,12 +1244,33 @@ function maintStats(sessions) {
   };
 }
 
-function oeeOf(agg) {
-  const A = agg.t.total > 0 ? agg.t.prod / agg.t.total : null;
-  const P = agg.nFinished > 0 && agg.theo > 0 ? agg.real / agg.theo : null;
-  const Q = agg.nFinished > 0 && agg.real > 0 ? (agg.real - agg.scrap) / agg.real : null;
-  const oee = (A !== null && P !== null && Q !== null) ? A * P * Q : null;
-  return { A, P, Q, oee };
+/* Dois OEEs:
+   · real (linha)  — toda a janela medida entra na base: paradas, ociosidade e espera;
+   · máquina       — tira da base o que não é responsabilidade da máquina (ociosidade
+                     e/ou espera, conforme a configuração de cálculo).
+   P e Q são iguais nos dois; muda só a Disponibilidade. */
+function calcCfg() { return db.calc || (db.calc = { idleCountsAsStop: false, waitCountsAsStop: false }); }
+function excludedMs(t) {
+  const c = calcCfg();
+  return (c.idleCountsAsStop ? 0 : t.idle) + (c.waitCountsAsStop ? 0 : t.wait);
+}
+function oeeOf(agg, opts) {
+  const t = agg.t;
+  const o = opts || {};
+  const real = o.real != null ? o.real : agg.real;
+  const scrap = o.scrap != null ? o.scrap : agg.scrap;
+  const has = o.real != null ? real > 0 : agg.nFinished > 0;
+  const excl = excludedMs(t);
+  const baseMach = Math.max(0, t.total - excl);
+  const A = t.total > 0 ? t.prod / t.total : null;
+  const Am = baseMach > 0 ? t.prod / baseMach : null;
+  const P = has && agg.theo > 0 ? real / agg.theo : null;
+  const Q = has && real > 0 ? (real - scrap) / real : null;
+  const mul = (a) => (a !== null && P !== null && Q !== null) ? a * P * Q : null;
+  /* microparadas: tempo produzindo que não virou peça (tempo efetivo = produzindo × P) */
+  const effMs = P !== null ? Math.min(t.prod, t.prod * P) : null;
+  const microMs = P !== null ? Math.max(0, t.prod - effMs) : null;
+  return { A, Am, P, Q, oee: mul(A), oeeM: mul(Am), baseMach, excl, effMs, microMs };
 }
 
 function renderDash() {
@@ -1133,7 +1279,7 @@ function renderDash() {
   const done = db.sessions.filter(s => s.end >= from);
   const all = db.active ? [...done, db.active] : done;
 
-  const chips = `<div class="chips">${Object.keys(PERIODS).map(k =>
+  const chips = `<div class="chips wide">${Object.keys(PERIODS).map(k =>
     `<button class="${db.period === k ? 'active' : ''}" data-p="${k}">${PERIODS[k][0]}</button>`).join('')}</div>`;
 
   if (all.length === 0) {
@@ -1143,7 +1289,7 @@ function renderDash() {
   }
 
   const agg = aggregate(all);
-  const { A, P, Q, oee } = oeeOf(agg);
+  const { A, Am, P, Q, oee, oeeM, excl, effMs, microMs } = oeeOf(agg);
 
   /* barra empilhada de tempos */
   const tt = agg.t.total || 1;
@@ -1188,19 +1334,22 @@ function renderDash() {
     const ag = aggregate(ms);
     const o = oeeOf(ag);
     const live = db.active && db.active.machineId === m.id;
+    const shown = o.oeeM !== null ? o.oeeM : o.Am;
     return `<div class="mrow">
-      ${donutSVG(o.oee !== null ? o.oee : o.A, 'OEE ' + m.name, o.oee !== null ? 'OEE' : 'DISP',
-        o.oee !== null ? oeeColor(o.oee, targetOf(m)) : null)}
+      ${donutSVG(shown, 'OEE máquina ' + m.name, o.oeeM !== null ? 'MÁQ.' : 'DISP',
+        o.oeeM !== null ? oeeColor(o.oeeM, targetOf(m)) : null)}
       <div class="info">
         <div class="nm">${esc(m.name)}${live ? ' <span style="color:var(--good);font-size:11px">● ao vivo</span>' : ''}</div>
-        <div class="sub">${esc(m.sector || '')} · meta OEE ${targetOf(m)}% · ${fmtInt(ag.real)} pçs reais · ${fmtInt(ag.scrap)} refugo</div>
+        <div class="sub">${esc(m.sector || '')} · meta ${targetOf(m)}% · OEE real ${o.oee !== null ? pct(o.oee) : '—'} · ${fmtInt(ag.real)} pçs · ${fmtInt(ag.scrap)} refugo</div>
         <div class="mini">
           <span>Produzindo <b>${fmtDurLong(ag.t.prod)}</b></span><span>Parada <b>${fmtDurLong(ag.t.stop)}</b></span>
           <span>Ociosa <b>${fmtDurLong(ag.t.idle)}</b></span><span>Esperando <b>${fmtDurLong(ag.t.wait)}</b></span>
+          <span>Microparadas <b>${o.microMs != null ? fmtDurLong(o.microMs) : '—'}</b></span><span>Fora da base <b>${fmtDurLong(o.excl)}</b></span>
         </div>
       </div></div>`;
   }).join('');
 
+  const avgMin = agg.t.prod > 0 ? agg.real / (agg.t.prod / 60000) : 0;
   const prodCard = agg.nFinished > 0 ? `
     <div class="card"><h2>Produção do período</h2>
       <div class="kpi-row">
@@ -1208,7 +1357,11 @@ function renderDash() {
         <div class="kpi"><div class="k">Real</div><div class="v">${fmtInt(agg.real)} <small>pçs</small></div></div>
         <div class="kpi"><div class="k">Diferença</div><div class="v ${agg.real - agg.theo >= 0 ? 'diff-pos' : 'diff-neg'}">${agg.real - agg.theo >= 0 ? '+' : ''}${fmtInt(agg.real - agg.theo)}</div></div>
         <div class="kpi"><div class="k">Refugo</div><div class="v">${fmtInt(agg.scrap)} <small>pçs</small></div></div>
-      </div></div>` : '';
+        <div class="kpi"><div class="k">Média real</div><div class="v">${fmtInt(avgMin)} <small>pçs/min</small></div></div>
+        <div class="kpi"><div class="k">Microparadas</div><div class="v diff-neg">${microMs != null ? fmtDurLong(microMs) : '—'}</div><div class="k">dentro do tempo produzindo</div></div>
+      </div>
+      ${microMs != null ? `<p class="hint" style="margin-top:10px">Para ${fmtInt(agg.real)} pçs no ritmo nominal bastariam <b>${fmtDurLong(effMs)}</b> de produção; o restante do tempo produzindo (<b class="diff-neg">${fmtDurLong(microMs)}</b>) foi microparada ou ritmo reduzido.</p>` : ''}
+    </div>` : '';
 
   /* meta de OEE do período: média das metas das máquinas com dados */
   const targets = machines.map(targetOf);
@@ -1232,18 +1385,29 @@ function renderDash() {
       <p class="hint" style="margin-top:10px">Classifique a parada como <b>Falha</b> ou <b>Quebra</b> e toque em “Manutenção chegou” durante a parada para alimentar MTTA e MTTR. Tempo operacional = tempo produzindo.</p>
     </div>`;
 
+  const c = calcCfg();
+  const outLabels = [!c.idleCountsAsStop ? 'ociosidade' : null, !c.waitCountsAsStop ? 'espera' : null].filter(Boolean);
+
   el.innerHTML = chips + `
-    <button class="btn ghost" id="repBtn">📄 Relatório executivo — salvar PNG / PDF</button>
-    <div class="card">
+    <button class="btn ghost wide" id="repBtn">📄 Relatório executivo — salvar PNG / PDF</button>
+    <div class="card wide">
       <h2>Visão geral · ${PERIODS[db.period][0].toLowerCase()}</h2>
       <div class="gauge-grid">
-        <div class="gauge gauge-hero">${donutSVG(oee, 'OEE', 'OEE', oeeColor(oee, target))}
-          <span class="glabel">OEE ${oee === null ? '(finalize um apontamento p/ calcular)' : ''}</span>
-          <span class="gmeta">meta ${target.toFixed(0)}%${oee !== null ? (oee * 100 >= target ? ' · ✓ atingida' : ' · abaixo') : ''}</span></div>
-        <div class="gauge">${donutSVG(A, 'Disponibilidade')}<span class="glabel">Disponibilidade</span></div>
-        <div class="gauge">${donutSVG(P, 'Performance')}<span class="glabel">Performance</span></div>
+        <div class="gauge gauge-hero">${donutSVG(oeeM, 'OEE máquina', 'MÁQUINA', oeeColor(oeeM, target))}
+          <span class="glabel">OEE da máquina</span>
+          <span class="gmeta">meta ${target.toFixed(0)}%${oeeM !== null ? (oeeM * 100 >= target ? ' · ✓ atingida' : ' · abaixo') : ''}</span></div>
+        <div class="gauge gauge-hero">${donutSVG(oee, 'OEE real', 'REAL', oeeColor(oee, target))}
+          <span class="glabel">OEE real (linha)</span>
+          <span class="gmeta">${excl > 0 ? `inclui ${fmtDurLong(excl)} de ${outLabels.join(' e ')}` : 'toda a janela medida'}</span></div>
+        <div class="gauge">${donutSVG(Am, 'Disponibilidade da máquina')}<span class="glabel">Disp. máquina</span>
+          <span class="gmeta">real ${A !== null ? pct(A, 0) : '—'}</span></div>
+        <div class="gauge">${donutSVG(P, 'Performance')}<span class="glabel">Performance</span>
+          <span class="gmeta">${microMs != null ? fmtDurLong(microMs) + ' micro' : ''}</span></div>
         <div class="gauge">${donutSVG(Q, 'Qualidade')}<span class="glabel">Qualidade</span></div>
       </div>
+      <p class="hint" style="margin-top:10px">${outLabels.length
+        ? `<b>OEE da máquina</b> tira da base ${outLabels.join(' e ')} — a máquina não é penalizada pelo que veio de fora. <b>OEE real</b> mostra a perda da linha inteira. Ajuste em Máquinas → Cálculo do OEE.`
+        : 'Ociosidade e espera estão contando como parada da máquina, então os dois OEEs coincidem. Ajuste em Máquinas → Cálculo do OEE.'}</p>
     </div>
     ${prodCard}
     ${maintCard}
@@ -1256,16 +1420,16 @@ function renderDash() {
           <span class="sw" style="background:transparent"></span><span class="nm"><b>Total medido</b></span><span class="tv">${fmtDurLong(agg.t.total)}</span></div>
       </div>
     </div>
-    <div class="card">
+    <div class="card span2">
       <h2>Paradas — principais motivos</h2>
       ${plannedSplit}
       ${reasons.length ? `<div class="hbars">${bars}</div>` : '<p class="hint">Nenhuma parada apontada no período. 🎉</p>'}
     </div>
-    <div class="card">
+    <div class="card span2">
       <h2>Por máquina</h2>
       ${perMachine || '<p class="hint">Sem dados por máquina.</p>'}
     </div>
-    <div class="card">
+    <div class="card span2">
       <h2>Apontamentos (${done.length})</h2>
       ${done.slice().reverse().slice(0, 20).map(s => {
         const m = machineById(s.machineId); const t = totals(s);
@@ -1332,11 +1496,26 @@ function renderMaq() {
       ${db.reasons.map((r, i) => `
         <div class="list-row">
           <div class="info"><div class="nm">${esc(r.name)} ${plannedBadge(r.planned)}</div>
-            <div class="sub">${esc(r.desc || 'sem descrição')}${r.planned && r.stdMin > 0 ? ` · tempo padrão ${r.stdMin}min` : ''}</div></div>
+            <div class="sub">${esc(r.desc || 'sem descrição')}${r.planned && r.stdMin > 0 ? ` · tempo padrão ${r.stdMin}min` : ''}
+              · <span style="color:var(--accent)">${esc(reasonScopeLabel(r))}</span></div></div>
           <div class="act"><button data-editr="${i}">✎</button><button data-delr="${i}" style="color:var(--bad)">✕</button></div>
         </div>`).join('')}
       <div style="height:12px"></div>
       <button class="btn ghost" id="rAdd">+ Novo motivo de parada</button>
+    </div>
+
+    <div class="card">
+      <h2>Cálculo do OEE</h2>
+      <p class="hint" style="margin-bottom:6px">Linha cíclica: escolha o que entra na conta da <b>máquina</b>. O <b>OEE real (linha)</b> sempre considera tudo; o <b>OEE da máquina</b> desconta da base o que você desmarcar aqui.</p>
+      <div class="toggle-row">
+        <input type="checkbox" id="cfgIdle" ${calcCfg().idleCountsAsStop ? 'checked' : ''}>
+        <span><b>Ociosa (sem insumo)</b> conta como parada da máquina</span>
+      </div>
+      <div class="toggle-row">
+        <input type="checkbox" id="cfgWait" ${calcCfg().waitCountsAsStop ? 'checked' : ''}>
+        <span><b>Esperando</b> (máquina da frente não puxou) conta como parada da máquina</span>
+      </div>
+      <p class="hint" style="margin-top:10px">Desligado (padrão), esse tempo sai da base do OEE da máquina — ela não é penalizada por espera de outra máquina, mas o OEE real da linha continua mostrando a perda.</p>
     </div>
 
     <div class="card">
@@ -1373,6 +1552,8 @@ function renderMaq() {
   el.querySelectorAll('[data-delr]').forEach(b => b.onclick = () => { db.reasons.splice(+b.dataset.delr, 1); save(); render(); });
   el.querySelectorAll('[data-editr]').forEach(b => b.onclick = () => openReasonEditSheet(+b.dataset.editr));
   $('#rAdd').onclick = () => openReasonEditSheet(null);
+  $('#cfgIdle').onchange = e => { calcCfg().idleCountsAsStop = e.target.checked; save(); };
+  $('#cfgWait').onchange = e => { calcCfg().waitCountsAsStop = e.target.checked; save(); };
 }
 
 /* editor de motivo de parada: tipo (nome), descrição e planejada/não planejada */
@@ -1391,14 +1572,31 @@ function openReasonEditSheet(idx) {
     <div class="field" id="stdField"><label for="reStd">Tempo padrão (minutos)</label>
       <input id="reStd" type="number" inputmode="decimal" min="0" step="any" placeholder="Ex.: 2" value="${r.stdMin > 0 ? r.stdMin : ''}">
       <span class="hint">O que passar do tempo padrão conta como <b>não planejado</b> — é a variação operacional. Deixe vazio para não limitar.</span></div>
+    <div class="field"><label>Aplica-se a</label>
+      <div class="pick-grid" id="reMachines">
+        <button class="pick" data-mid="all">Todas as máquinas</button>
+        ${db.machines.map(m => `<button class="pick" data-mid="${m.id}">${esc(m.name)}</button>`).join('')}
+      </div>
+      <span class="hint">Escolha uma, várias ou todas — o motivo só aparece ao apontar nas máquinas selecionadas.</span></div>
     <button class="btn" id="reSave">Salvar</button>
     <button class="btn ghost" id="reCancel">Cancelar</button>`);
   let planned = !!r.planned;
+  let mids = Array.isArray(r.machineIds) ? r.machineIds.filter(id => machineById(id)) : [];
   const paint = () => {
     $('#rePlan').style.cssText = planned ? 'background:var(--accent);color:var(--btn-ink)' : '';
     $('#reUnplan').style.cssText = planned ? '' : 'background:var(--bad);color:var(--btn-ink)';
     $('#stdField').style.display = planned ? '' : 'none';
+    $('#reMachines').querySelectorAll('.pick').forEach(b => {
+      const on = b.dataset.mid === 'all' ? mids.length === 0 : mids.includes(b.dataset.mid);
+      b.classList.toggle('on', on);
+    });
   };
+  $('#reMachines').querySelectorAll('.pick').forEach(b => b.onclick = () => {
+    const id = b.dataset.mid;
+    if (id === 'all') mids = [];
+    else mids = mids.includes(id) ? mids.filter(x => x !== id) : [...mids, id];
+    paint();
+  });
   paint();
   $('#rePlan').onclick = () => { planned = true; paint(); };
   $('#reUnplan').onclick = () => { planned = false; paint(); };
@@ -1408,8 +1606,9 @@ function openReasonEditSheet(idx) {
     if (!name) { $('#reName').focus(); return; }
     const desc = $('#reDesc').value.trim();
     const stdMin = planned ? (parseFloat($('#reStd').value) > 0 ? parseFloat($('#reStd').value) : null) : null;
-    if (idx != null) Object.assign(db.reasons[idx], { name, desc, planned, stdMin });
-    else db.reasons.push({ id: uid(), name, desc, planned, stdMin });
+    const machineIds = mids.length ? mids : null;
+    if (idx != null) Object.assign(db.reasons[idx], { name, desc, planned, stdMin, machineIds });
+    else db.reasons.push({ id: uid(), name, desc, planned, stdMin, machineIds });
     save(); closeSheet(); render();
   };
 }
@@ -1479,16 +1678,20 @@ function buildReportSVG(d) {
 
   const y1 = 78, h1 = 236, y2 = y1 + h1 + 12, h2 = 212, y3 = y2 + h2 + 12, h3 = 216;
 
-  /* ---- OEE Real ---- */
-  s += card(24, y1, 352, h1, 'OEE Real');
-  [['Disponibilidade', o.A], ['Performance', o.P], ['Qualidade', o.Q]].forEach(([lbl, v], i) => {
-    const ry = y1 + 70 + i * 54;
-    s += txt(40, ry, fmtP(v), 17, 800, C.ink);
-    s += txt(40, ry + 16, lbl, 10.5, 600, C.muted);
-    s += bar(40, ry + 24, 150, 7, v || 0, C.accent);
+  /* ---- OEE: máquina × real ---- */
+  s += card(24, y1, 352, h1, 'OEE — máquina × real (linha)');
+  const oeeMCol = o.oeeM == null ? C.accent : (o.oeeM * 100 >= target ? C.good : C.bad);
+  s += donut(108, y1 + 96, 52, 14, o.oeeM, oeeMCol, fmtP(o.oeeM), 'MÁQUINA');
+  s += donut(292, y1 + 96, 52, 14, o.oee, oeeCol, fmtP(o.oee), 'REAL');
+  s += txt(108, y1 + 166, `meta ${target.toFixed(0)}%${o.oeeM != null ? (o.oeeM * 100 >= target ? ' · ✓' : ' · abaixo') : ''}`, 10, 700, o.oeeM == null ? C.muted : oeeMCol, 'middle');
+  s += txt(292, y1 + 166, o.excl > 0 ? `inclui ${fmtDurLong(o.excl)} de fora` : 'toda a janela', 10, 700, C.muted, 'middle');
+  [['Disponibilidade (máq. / real)', o.Am, `${fmtP(o.Am)} / ${fmtP(o.A)}`],
+   ['Performance', o.P, fmtP(o.P)],
+   ['Qualidade', o.Q, fmtP(o.Q)]].forEach(([lbl, v, val], i) => {
+    const ry = y1 + 192 + i * 16;
+    s += txt(40, ry, lbl, 10, 600, C.muted);
+    s += txt(360, ry, val, 10.5, 800, C.ink, 'end');
   });
-  s += donut(294, y1 + 128, 58, 15, o.oee, oeeCol, fmtP(o.oee), 'OEE');
-  s += txt(294, y1 + 218, `meta ${target.toFixed(0)}%${o.oee != null ? (o.oee * 100 >= target ? ' · ✓ atingida' : ' · abaixo da meta') : ''}`, 11, 700, o.oee == null ? C.muted : oeeCol, 'middle');
 
   /* ---- Pareto de paradas ---- */
   s += card(392, y1, 356, h1, 'Paradas — Pareto');
@@ -1523,9 +1726,13 @@ function buildReportSVG(d) {
   const diff = agg.real - agg.theo;
   s += tile(778, y1 + 42, 148, 'TEÓRICA', fmtInt(agg.theo) + ' pçs');
   s += tile(936, y1 + 42, 148, 'REAL', fmtInt(agg.real) + ' pçs');
-  s += tile(778, y1 + 126, 148, 'DIFERENÇA', (diff >= 0 ? '+' : '') + fmtInt(diff), 'real − teórica', diff >= 0 ? C.good : C.bad);
-  s += tile(936, y1 + 126, 148, 'REFUGO', fmtInt(agg.scrap) + ' pçs', agg.real > 0 ? pct(agg.scrap / agg.real) + ' do real' : '');
-  s += txt(778, y1 + 222, agg.nFinished > 0 ? `${agg.nFinished} apontamento(s) finalizado(s)` : 'Nenhum apontamento finalizado no período', 10.5, 600, C.muted);
+  const avgMin = agg.t.prod > 0 ? agg.real / (agg.t.prod / 60000) : 0;
+  s += tile(778, y1 + 126, 148, 'MÉDIA REAL', fmtInt(avgMin) + ' pçs/min', `refugo ${fmtInt(agg.scrap)} pçs`);
+  s += tile(936, y1 + 126, 148, 'MICROPARADAS', o.microMs != null ? fmtDurLong(o.microMs) : '—', 'ritmo perdido', C.bad);
+  s += txt(778, y1 + 216, `Diferença real − teórica: ${(diff >= 0 ? '+' : '') + fmtInt(diff)} pçs`, 10, 700, diff >= 0 ? C.good : C.bad);
+  s += txt(778, y1 + 228, o.effMs != null
+    ? `Para ${fmtInt(agg.real)} pçs bastariam ${fmtDurLong(o.effMs)} de produção.`
+    : 'Nenhum apontamento finalizado no período', 9.5, 600, C.muted);
 
   /* ---- Distribuição do tempo ---- */
   s += card(24, y2, 352, h2, 'Distribuição do tempo');
@@ -1536,14 +1743,19 @@ function buildReportSVG(d) {
     const w = sbw * agg.t[k] / tt;
     if (w > 0.5) { s += `<rect x="${sx.toFixed(1)}" y="${y2 + 44}" width="${w.toFixed(1)}" height="20" rx="3" fill="${{ prod: C.prod, stop: C.stop, idle: C.idle, wait: C.wait }[k]}"/>`; sx += w + 2; }
   });
+  const cfg = calcCfg();
+  const outOf = k => (k === 'idle' && !cfg.idleCountsAsStop) || (k === 'wait' && !cfg.waitCountsAsStop);
   STATE_ORDER.forEach((k, i) => {
-    const ry = y2 + 92 + i * 25;
+    const ry = y2 + 90 + i * 23;
     s += `<rect x="40" y="${ry - 9}" width="11" height="11" rx="3" fill="${{ prod: C.prod, stop: C.stop, idle: C.idle, wait: C.wait }[k]}"/>`;
-    s += txt(58, ry, STATES[k].label, 11.5, 600, C.ink2);
-    s += txt(360, ry, `${fmtDurLong(agg.t[k])} · ${Math.round(agg.t[k] / tt * 100)}%`, 11.5, 700, C.ink, 'end');
+    s += `<text x="58" y="${ry}" font-size="11" font-weight="600" fill="${C.ink2}" font-family="${FONT}">${esc(STATES[k].label)}${outOf(k) ? ` <tspan font-size="8" fill="${C.accent}">FORA DO OEE MÁQ.</tspan>` : ''}</text>`;
+    s += txt(360, ry, `${fmtDurLong(agg.t[k])} · ${Math.round(agg.t[k] / tt * 100)}%`, 11, 700, C.ink, 'end');
   });
-  s += txt(40, y2 + 196, 'Total medido', 11.5, 800, C.ink);
-  s += txt(360, y2 + 196, fmtDurLong(agg.t.total), 11.5, 800, C.ink, 'end');
+  s += txt(40, y2 + 186, 'Total medido', 11, 800, C.ink);
+  s += txt(360, y2 + 186, fmtDurLong(agg.t.total), 11, 800, C.ink, 'end');
+  s += txt(40, y2 + 202, o.excl > 0
+    ? `Base do OEE da máquina: ${fmtDurLong(o.baseMach)} (fora ${fmtDurLong(o.excl)}).`
+    : 'Base do OEE da máquina: toda a janela medida.', 9, 600, C.muted);
 
   /* ---- Manutenção ---- */
   s += card(392, y2, 356, h2, 'Manutenção');
@@ -1569,29 +1781,32 @@ function buildReportSVG(d) {
 
   /* ---- Por máquina ---- */
   s += card(24, y3, W - 48, h3, 'Por máquina');
-  const cols = [['MÁQUINA', 40, 'start'], ['OEE', 400, 'end'], ['META', 480, 'end'], ['DISP.', 570, 'end'],
-    ['PERF.', 660, 'end'], ['QUAL.', 750, 'end'], ['REAL', 850, 'end'], ['REFUGO', 950, 'end'], ['PARADA', 1075, 'end']];
-  cols.forEach(([t, x, a]) => s += txt(x, y3 + 48, t, 9.5, 700, C.muted, a));
+  const cols = [['MÁQUINA', 40, 'start'], ['OEE MÁQ.', 390, 'end'], ['OEE REAL', 480, 'end'], ['META', 550, 'end'],
+    ['DISP. MÁQ.', 650, 'end'], ['PERF.', 720, 'end'], ['QUAL.', 790, 'end'], ['REAL', 870, 'end'],
+    ['REFUGO', 945, 'end'], ['MICRO', 1015, 'end'], ['PARADA', 1075, 'end']];
+  cols.forEach(([t, x, a]) => s += txt(x, y3 + 48, t, 9, 700, C.muted, a));
   s += `<line x1="40" y1="${y3 + 56}" x2="${W - 40}" y2="${y3 + 56}" stroke="${C.grid}"/>`;
   if (!perMachine.length) s += txt(40, y3 + 84, 'Sem dados de máquina no período.', 12, 600, C.muted);
   perMachine.slice(0, 5).forEach(({ m, ag, o: mo }, i) => {
     const ry = y3 + 78 + i * 26;
     const mT = targetOf(m);
-    const oc = mo.oee == null ? C.ink : (mo.oee * 100 >= mT ? C.good : C.bad);
-    s += txt(40, ry, tr(m.name + (m.sector ? ' · ' + m.sector : ''), 42), 12, 700, C.ink);
-    s += txt(400, ry, fmtP(mo.oee), 12, 800, oc, 'end');
-    s += txt(480, ry, mT.toFixed(0) + '%', 11.5, 600, C.ink2, 'end');
-    s += txt(570, ry, fmtP(mo.A), 11.5, 600, C.ink2, 'end');
-    s += txt(660, ry, fmtP(mo.P), 11.5, 600, C.ink2, 'end');
-    s += txt(750, ry, fmtP(mo.Q), 11.5, 600, C.ink2, 'end');
-    s += txt(850, ry, fmtInt(ag.real), 11.5, 600, C.ink2, 'end');
-    s += txt(950, ry, fmtInt(ag.scrap), 11.5, 600, C.ink2, 'end');
-    s += txt(1075, ry, fmtDurLong(ag.t.stop), 11.5, 600, C.ink2, 'end');
+    const oc = mo.oeeM == null ? C.ink : (mo.oeeM * 100 >= mT ? C.good : C.bad);
+    s += txt(40, ry, tr(m.name + (m.sector ? ' · ' + m.sector : ''), 34), 11.5, 700, C.ink);
+    s += txt(390, ry, fmtP(mo.oeeM), 12, 800, oc, 'end');
+    s += txt(480, ry, fmtP(mo.oee), 11, 700, C.ink2, 'end');
+    s += txt(550, ry, mT.toFixed(0) + '%', 11, 600, C.ink2, 'end');
+    s += txt(650, ry, fmtP(mo.Am), 11, 600, C.ink2, 'end');
+    s += txt(720, ry, fmtP(mo.P), 11, 600, C.ink2, 'end');
+    s += txt(790, ry, fmtP(mo.Q), 11, 600, C.ink2, 'end');
+    s += txt(870, ry, fmtInt(ag.real), 11, 600, C.ink2, 'end');
+    s += txt(945, ry, fmtInt(ag.scrap), 11, 600, C.ink2, 'end');
+    s += txt(1015, ry, mo.microMs != null ? fmtDurLong(mo.microMs) : '—', 11, 600, C.ink2, 'end');
+    s += txt(1075, ry, fmtDurLong(ag.t.stop), 11, 600, C.ink2, 'end');
   });
   if (perMachine.length > 5) s += txt(40, y3 + 78 + 5 * 26, `+ ${perMachine.length - 5} máquina(s) não exibida(s)`, 10.5, 600, C.muted);
 
   /* rodapé */
-  s += txt(24, H - 12, 'MES — apontamento manual de produção · OEE = Disponibilidade × Performance × Qualidade', 9.5, 600, C.muted);
+  s += txt(24, H - 12, `MES — OEE = Disp. × Perf. × Qual. · OEE máquina desconta ${o.excl > 0 ? 'ociosidade/espera de outras máquinas' : 'nada (tudo conta)'} · OEE real = linha inteira`, 9.5, 600, C.muted);
   s += txt(W - 24, H - 12, 'dados registrados no aparelho', 9.5, 600, C.muted, 'end');
   s += '</svg>';
   return s;

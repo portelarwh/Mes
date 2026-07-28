@@ -34,6 +34,10 @@ Pages**: Settings → Pages → branch `main` → `/ (root)`.
 
    Tocar em qualquer estado **encerra o anterior** — apontar uma parada sempre
    interrompe a produção. Os 4 cronômetros acumulam em tempo real.
+   Cada botão de estado mostra o **tempo somado** daquele estado, e o card de
+   Produção aceita uma **produção parcial** a qualquer momento — dela saem a
+   média real (pçs/min), as **microparadas** (tempo produzindo que não virou
+   peça) e o **OEE parcial ao vivo**, real e da máquina.
 3. **Finalizar** → informe a **produção real** contada e o **refugo**. O app
    mostra a diferença real × teórica e salva o apontamento.
    Um apontamento **fechado** pode ser editado depois pelo botão ✎ na lista
@@ -56,8 +60,29 @@ Pages**: Settings → Pages → branch `main` → `/ (root)`.
    manutenção, distribuição do tempo e tabela por máquina — exportável em
    **PNG** (download direto) ou **PDF** (diálogo de impressão do navegador).
 
-Os **motivos de parada** são configuráveis na aba Máquinas: tipo (nome),
-descrição e classificação **planejada / não planejada**. Motivos planejados
+## Dois OEEs — linha cíclica
+
+Numa linha cíclica uma máquina não deve ser penalizada porque a máquina da
+frente não puxou. Por isso o app mostra sempre dois números:
+
+- **OEE real (linha)** — toda a janela medida entra na base: paradas,
+  ociosidade e espera. É a perda real do fluxo.
+- **OEE da máquina** — tira da base o que não é responsabilidade dela. Em
+  **Máquinas → Cálculo do OEE** você decide se *Ociosa (sem insumo)* e
+  *Esperando* contam como parada da máquina (padrão: não contam).
+
+## Motivos de parada
+
+Configuráveis na aba Máquinas: tipo (nome), descrição, classificação
+**planejada / não planejada**, tempo padrão e **a quais máquinas se aplicam**
+— uma, várias ou todas. Ao apontar, só aparecem os motivos válidos para a
+máquina em medição.
+
+## Desktop
+
+Em telas a partir de 900px o app troca a barra inferior por um menu no topo e
+distribui os cards em colunas (2 colunas até 1280px, 3 acima disso), com os
+quatro estados lado a lado e os gauges numa linha só. Motivos planejados
 podem ter um **tempo padrão** (ex.: 2 min): se a parada real passar disso
 (ex.: 4 min), os 2 min do padrão contam como planejados e os 2 min restantes
 como **não planejados** — o **estouro**, que mede a variação operacional. O
@@ -69,10 +94,14 @@ destacado no Dashboard e no relatório executivo.
 | Métrica | Fórmula | Objetivo |
 |---|---|---|
 | Contagem teórica | capacidade (pçs/min) × tempo em Produção | — |
-| Disponibilidade | tempo produzindo ÷ tempo total medido | ↑ |
+| Disponibilidade real | tempo produzindo ÷ tempo total medido | ↑ |
+| Disponibilidade da máquina | tempo produzindo ÷ (total − ociosidade/espera excluídas) | ↑ |
 | Performance | produção real ÷ produção teórica | ↑ |
 | Qualidade | (real − refugo) ÷ real | ↑ |
-| OEE | Disponibilidade × Performance × Qualidade | ≥ meta |
+| **OEE real (linha)** | Disp. real × Performance × Qualidade | ≥ meta |
+| **OEE da máquina** | Disp. da máquina × Performance × Qualidade | ≥ meta |
+| Tempo efetivo | produção real ÷ capacidade nominal | — |
+| Microparadas | tempo produzindo − tempo efetivo | ↓ |
 | MTBF | tempo produzindo ÷ nº de falhas (falhas + quebras) | ↑ |
 | MTBB | tempo produzindo ÷ nº de quebras (dano físico) | ↑ |
 | MTTA | média (chegada da manutenção − início da parada) | ↓ |
