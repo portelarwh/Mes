@@ -220,6 +220,36 @@
   .callout .acts { display: flex; flex-wrap: wrap; gap: 8px; }
   .field input[readonly] { background: var(--track); color: var(--ink-2); border-style: dashed; }
 
+  /* ---- campo com calculadora + eco do valor lido ---- */
+  .field-head { display: flex; align-items: center; gap: 6px; }
+  .field-head label { flex: 1; min-width: 0; }
+  .mini-btn {
+    width: 30px; height: 30px; flex: none; border-radius: 9px; border: 1px solid var(--baseline);
+    background: var(--page); display: grid; place-items: center; font-size: 15px; line-height: 1;
+  }
+  .mini-btn:active { background: var(--accent-soft); border-color: var(--accent); }
+  .field .echo { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; min-height: 15px; }
+  .field .echo b { color: var(--ink-2); font-weight: 700; }
+
+  /* ---- calculadora de tempo ---- */
+  .calc-row { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 8px; align-items: end; }
+  .calc-row .field { margin: 0; gap: 4px; }
+  .calc-row .field label { font-size: 11px; }
+  .calc-add { width: 46px; height: 44px; border-radius: 12px; background: var(--accent); color: var(--btn-ink); font-size: 20px; font-weight: 800; }
+  .calc-add:active { transform: scale(.96); }
+  .calc-list { display: grid; gap: 6px; max-height: 28vh; overflow-y: auto; }
+  .calc-item {
+    display: flex; align-items: center; gap: 10px; font-size: 13.5px;
+    padding: 8px 10px; background: var(--page); border-radius: 10px; border: 1px solid var(--ring);
+  }
+  .calc-item .nm { flex: 1; color: var(--ink-2); min-width: 0; }
+  .calc-item .tv { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .calc-item button { color: var(--bad); font-weight: 800; padding: 0 2px; font-size: 15px; }
+  .calc-total { display: flex; align-items: baseline; gap: 10px; padding: 11px 12px; background: var(--track); border-radius: 12px; }
+  .calc-total .k { font-size: 11px; font-weight: 700; color: var(--muted); letter-spacing: .04em; }
+  .calc-total .v { flex: 1; text-align: right; font-size: 21px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .calc-total .v small { display: block; font-size: 12px; color: var(--muted); font-weight: 600; }
+
   .btn {
     border-radius: 12px; padding: 14px; font-weight: 800; font-size: 15px;
     background: var(--accent); color: var(--btn-ink); width: 100%;
@@ -443,7 +473,7 @@
 /* =====================================================
    MES — Apontamento de produção, paradas e refugo
    ===================================================== */
-const APP_VERSION = '2.1.0';   // ⬅ suba a versão a cada atualização
+const APP_VERSION = '2.2.0';   // ⬅ suba a versão a cada atualização
 document.getElementById('verBadge').textContent = 'v' + APP_VERSION;
 
 const STATES = {
@@ -1045,17 +1075,60 @@ function fmtMinutes(n) {
   return (neg ? '−' : '') + txt;
 }
 
-/* campos de ineficiência apontáveis, na ordem em que aparecem na tela */
+const fmtSec = s => fmtMinutes((s || 0) / 60);
+/* segundos → "5:30" (mm:ss) ou "1:05:30" (h:mm:ss) */
+function fmtClock(sec) {
+  sec = Math.round(Math.max(0, sec));
+  const h = Math.floor(sec / 3600), mi = Math.floor((sec % 3600) / 60), s = sec % 60;
+  return h > 0 ? `${h}:${String(mi).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+               : `${mi}:${String(s).padStart(2, '0')}`;
+}
+/* texto livre → segundos. Entende 330 · 5:30 · 1:05:30 · 5min · 5m30s · 2h
+   `unit` é como interpretar um número solto: 's' (padrão) ou 'min'.        */
+function parseDur(str, unit) {
+  const t = String(str == null ? '' : str).trim().toLowerCase().replace(',', '.');
+  if (!t) return null;
+  if (t.includes(':')) {                                   /* mm:ss ou h:mm:ss */
+    const p = t.split(':').map(x => parseFloat(x) || 0);
+    if (p.some(x => !isFinite(x))) return null;
+    return p.length >= 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + p[1];
+  }
+  if (/[hms]/.test(t)) {                                   /* 2h 5min 30s */
+    const g = (re) => { const m = t.match(re); return m ? parseFloat(m[1]) : 0; };
+    const sec = g(/(\d+(?:\.\d+)?)\s*h/) * 3600 + g(/(\d+(?:\.\d+)?)\s*m(?!s)/) * 60 + g(/(\d+(?:\.\d+)?)\s*s/);
+    return sec > 0 ? sec : null;
+  }
+  const n = parseFloat(t);
+  if (!isFinite(n)) return null;
+  return unit === 'min' ? n * 60 : n;
+}
+
+/* campos de ineficiência apontáveis, na ordem em que aparecem na tela.
+   Os valores são apontados em SEGUNDOS (paradas costumam durar segundos). */
 const MANUAL_BUCKETS = [
-  { key: 'stop', id: 'inStop', label: 'Paradas',     color: 'var(--st-stop)' },
-  { key: 'idle', id: 'inIdle', label: 'Ociosidade',  color: 'var(--st-idle)' },
-  { key: 'wait', id: 'inWait', label: 'Esperando',   color: 'var(--st-wait)' },
+  { key: 'stopS', id: 'inStop', label: 'Paradas',    color: 'var(--st-stop)' },
+  { key: 'idleS', id: 'inIdle', label: 'Ociosidade', color: 'var(--st-idle)' },
+  { key: 'waitS', id: 'inWait', label: 'Esperando',  color: 'var(--st-wait)' },
 ];
 let manualRecalc = () => {};
 
 function renderManual() {
   const el = $('#page-manual');
   const m = db.manual || {};
+  /* migração: até a v2.1.0 paradas/ociosidade/espera eram digitadas em minutos */
+  if (m.stopS === undefined && (m.stop != null || m.idle != null || m.wait != null)) {
+    const cv = x => (x == null ? null : Math.round(x * 60));
+    m.stopS = cv(m.stop); m.idleS = cv(m.idle); m.waitS = cv(m.wait);
+    delete m.stop; delete m.idle; delete m.wait;
+    db.manual = m; save();
+  }
+  const secField = (id, key, label) => `
+    <div class="field" style="margin:0">
+      <div class="field-head"><label for="${id}">${label}</label>
+        <button class="mini-btn" data-calc="${key}" title="Calculadora de tempo — ${label}" aria-label="Calculadora de tempo — ${label}">🧮</button></div>
+      <input id="${id}" type="text" inputmode="numeric" autocomplete="off" placeholder="em branco" value="${m[key] ?? ''}">
+      <span class="echo" id="echo${id}"></span>
+    </div>`;
   el.innerHTML = `
     <div class="card">
       <h2>1 · Período e produção</h2>
@@ -1082,17 +1155,18 @@ function renderManual() {
     <div class="card">
       <h2>2 · De onde veio a ineficiência</h2>
       <div id="balanceOut"></div>
-      <div class="kpi-row" style="margin:14px 0 12px">
-        <div class="field" style="margin:0"><label for="inStop">Paradas (min)</label>
-          <input id="inStop" type="number" inputmode="decimal" min="0" step="any" placeholder="em branco" value="${m.stop ?? ''}"></div>
-        <div class="field" style="margin:0"><label for="inIdle">Ociosidade — sem insumo (min)</label>
-          <input id="inIdle" type="number" inputmode="decimal" min="0" step="any" placeholder="em branco" value="${m.idle ?? ''}"></div>
+      <p class="hint" style="margin:14px 0 8px">Aponte em <b>segundos</b>. Também aceita <b>mm:ss</b> (5:30) ou <b>5min</b> — e o 🧮 soma várias paradas para você.</p>
+      <div class="kpi-row" style="margin-bottom:12px">
+        ${secField('inStop', 'stopS', 'Paradas (s)')}
+        ${secField('inIdle', 'idleS', 'Ociosidade (s)')}
       </div>
       <div class="kpi-row">
-        <div class="field" style="margin:0"><label for="inWait">Esperando linha (min)</label>
-          <input id="inWait" type="number" inputmode="decimal" min="0" step="any" placeholder="em branco" value="${m.wait ?? ''}"></div>
-        <div class="field" style="margin:0"><label for="inMicro">Micro paradas (min) · saldo</label>
-          <input id="inMicro" type="text" readonly tabindex="-1" placeholder="—"></div>
+        ${secField('inWait', 'waitS', 'Esperando linha (s)')}
+        <div class="field" style="margin:0">
+          <div class="field-head"><label for="inMicro">Micro paradas (s) · saldo</label></div>
+          <input id="inMicro" type="text" readonly tabindex="-1" placeholder="—">
+          <span class="echo" id="echoinMicro"></span>
+        </div>
       </div>
       <div id="suggestOut" style="margin-top:14px"></div>
     </div>
@@ -1100,21 +1174,28 @@ function renderManual() {
 
   const ids = ['inRate', 'inTotal', 'inStop', 'inIdle', 'inWait', 'inReal', 'inScrap'];
   const numOf = id => { const n = parseFloat($('#' + id).value); return isFinite(n) ? n : null; };
+  const secOf = id => { const s = parseDur($('#' + id).value, 's'); return s == null ? null : Math.max(0, s); };
   const readInputs = () => ({
     machineId: $('#inMach').value || null,
     rate: numOf('inRate'),
     total: numOf('inTotal'),
-    stop: numOf('inStop'),   /* null = campo em branco (≠ zero apontado) */
-    idle: numOf('inIdle'),
-    wait: numOf('inWait'),
+    stopS: secOf('inStop'),   /* null = campo em branco (≠ zero apontado) */
+    idleS: secOf('inIdle'),
+    waitS: secOf('inWait'),
     real: numOf('inReal'),
     scrap: numOf('inScrap'),
   });
   manualRecalc = () => {
     db.manual = readInputs(); save();
+    MANUAL_BUCKETS.forEach(b => {
+      const raw = $('#' + b.id).value.trim(), sec = db.manual[b.key];
+      $('#echo' + b.id).innerHTML = !raw ? '' : sec == null ? '<span style="color:var(--bad)">não entendi o valor</span>'
+        : `= <b>${fmtSec(sec)}</b>${/[:hms]/i.test(raw) ? ` · ${fmtInt(sec)} s` : ''}`;
+    });
     calcManual(db.manual);
   };
   ids.forEach(id => $('#' + id).oninput = manualRecalc);
+  el.querySelectorAll('[data-calc]').forEach(b => b.onclick = () => openCalcSheet(b.dataset.calc));
   $('#inMach').onchange = () => {
     const mm = machineById($('#inMach').value);
     if (mm) $('#inRate').value = mm.rate;
@@ -1123,12 +1204,73 @@ function renderManual() {
   manualRecalc();
 }
 
-/* joga `add` minutos no campo `id` (somando ao que já estiver lá) */
-function manualAdd(id, add) {
+/* joga `addSec` segundos no campo `id` (somando ao que já estiver lá) */
+function manualAdd(id, addSec) {
   const el = $('#' + id); if (!el) return;
-  const cur = parseFloat(el.value);
-  el.value = +(((isFinite(cur) ? cur : 0) + add).toFixed(2));
+  const cur = parseDur(el.value, 's') || 0;
+  el.value = Math.max(0, Math.round(cur + addSec));
   manualRecalc();
+}
+
+/* =====================================================
+   Calculadora de tempo — soma paradas em mm:ss
+   ===================================================== */
+let calcParts = [];
+function openCalcSheet(key) {
+  const b = MANUAL_BUCKETS.find(x => x.key === key);
+  calcParts = [];
+  openSheet(`
+    <h3>🧮 Somar tempo — ${b.label}</h3>
+    <p class="hint">Digite a duração de cada parada e quantas vezes ela aconteceu. No campo de minutos você pode escrever direto <b>5:30</b> (5min 30s).</p>
+    <div class="calc-row">
+      <div class="field"><label for="cMin">Minutos</label>
+        <input id="cMin" type="text" inputmode="numeric" autocomplete="off" placeholder="5 ou 5:30"></div>
+      <div class="field"><label for="cSec">Segundos</label>
+        <input id="cSec" type="number" inputmode="numeric" min="0" step="any" placeholder="30"></div>
+      <div class="field"><label for="cQty">Vezes</label>
+        <input id="cQty" type="number" inputmode="numeric" min="1" step="1" placeholder="1"></div>
+      <button class="calc-add" id="cAdd" title="Adicionar" aria-label="Adicionar">＋</button>
+    </div>
+    <div class="pick-grid" id="cQuick">
+      ${[15, 30, 60, 120, 300, 600].map(s => `<button class="pick" data-q="${s}">+ ${fmtSec(s)}</button>`).join('')}
+    </div>
+    <div id="cBody"></div>`);
+
+  const bodyEl = $('#cBody');
+  const total = () => calcParts.reduce((a, p) => a + p.sec * p.qty, 0);
+
+  const draw = () => {
+    const tot = total();
+    bodyEl.innerHTML = `
+      ${calcParts.length ? `<div class="calc-list">${calcParts.map((p, i) => `
+        <div class="calc-item"><span class="nm">${fmtClock(p.sec)}${p.qty > 1 ? ` × ${p.qty}` : ''}</span>
+          <span class="tv">${fmtInt(p.sec * p.qty)} s</span>
+          <button data-del="${i}" aria-label="Remover">✕</button></div>`).join('')}</div>`
+        : '<p class="hint">Nenhuma parada somada ainda.</p>'}
+      <div class="calc-total" style="margin-top:12px"><span class="k">TOTAL</span>
+        <span class="v">${fmtInt(tot)} s<small>${fmtSec(tot)} · ${fmtClock(tot)}</small></span></div>
+      <button class="btn" id="cApply" ${tot > 0 ? '' : 'disabled style="opacity:.5"'}>↳ Somar em ${b.label} (+${fmtInt(tot)} s)</button>
+      <button class="btn ghost" id="cSet" ${tot > 0 ? '' : 'disabled style="opacity:.5"'}>Substituir: ${b.label} = ${fmtInt(tot)} s</button>
+      <button class="btn ghost" id="cClose">Fechar</button>`;
+    bodyEl.querySelectorAll('[data-del]').forEach(x => x.onclick = () => { calcParts.splice(+x.dataset.del, 1); draw(); });
+    $('#cApply').onclick = () => { if (total() > 0) { manualAdd(b.id, total()); closeSheet(); } };
+    $('#cSet').onclick = () => { if (total() > 0) { $('#' + b.id).value = Math.round(total()); manualRecalc(); closeSheet(); } };
+    $('#cClose').onclick = closeSheet;
+  };
+
+  const add = sec => {
+    if (!(sec > 0)) return;
+    const qty = Math.max(1, Math.round(parseFloat($('#cQty').value) || 1));
+    calcParts.push({ sec: Math.round(sec), qty });
+    $('#cMin').value = ''; $('#cSec').value = ''; $('#cQty').value = '';
+    draw();
+    $('#cMin').focus();
+  };
+  $('#cAdd').onclick = () => add((parseDur($('#cMin').value, 'min') || 0) + (parseDur($('#cSec').value, 's') || 0));
+  $('#cMin').onkeydown = $('#cSec').onkeydown = $('#cQty').onkeydown = e => { if (e.key === 'Enter') $('#cAdd').click(); };
+  $('#cQuick').querySelectorAll('[data-q]').forEach(x => x.onclick = () => add(+x.dataset.q));
+  draw();
+  $('#cMin').focus();
 }
 
 function calcManual(v) {
@@ -1139,7 +1281,7 @@ function calcManual(v) {
   if (!(rate > 0 && total > 0 && real != null && real >= 0)) {
     if (bal) bal.innerHTML = '<p class="hint">Preencha <b>capacidade nominal</b>, <b>tempo de produção</b> e <b>produção total</b> — o app calcula na hora o tempo de máquina útil e o tempo de ineficiência.</p>';
     if (sug) sug.innerHTML = '';
-    if (micEl) micEl.value = '';
+    if (micEl) { micEl.value = ''; $('#echoinMicro').innerHTML = ''; }
     out.innerHTML = '<div class="card"><p class="hint">Aguardando os dados do período para calcular o OEE.</p></div>';
     return;
   }
@@ -1155,14 +1297,20 @@ function calcManual(v) {
   const utilScrap = util - utilGood;
   const ineff    = total - util;            /* tempo de ineficiência */
 
-  const val   = k => (v[k] == null ? 0 : Math.max(0, v[k]));
+  /* os buckets são apontados em segundos; aqui tudo vira minuto */
+  const val   = k => (v[k] == null ? 0 : Math.max(0, v[k]) / 60);
   const blank = k => v[k] == null;
   const declared = MANUAL_BUCKETS.reduce((a, b) => a + val(b.key), 0);
   const micro    = ineff - declared;        /* saldo → micro paradas */
   const microPos = Math.max(0, micro);
+  const microSec = Math.round(microPos * 60);
   const oper     = total - declared;        /* tempo rodando = útil + micro */
 
-  if (micEl) micEl.value = ineff >= -MIN_EPS && micro >= -MIN_EPS ? fmtMinutes(microPos) : '—';
+  const microOk = ineff >= -MIN_EPS && micro >= -MIN_EPS;
+  if (micEl) {
+    micEl.value = microOk ? fmtInt(microSec) : '—';
+    $('#echoinMicro').innerHTML = microOk ? `= <b>${fmtSec(microSec)}</b>` : '';
+  }
 
   /* ---- cascata: janela → útil → ineficiência ---- */
   bal.innerHTML = `
@@ -1195,7 +1343,7 @@ function calcManual(v) {
   /* ---- ledger da dedução + sugestão do saldo ---- */
   const ledger = MANUAL_BUCKETS.filter(b => !blank(b.key) || val(b.key) > 0).map(b =>
     `<div class="wf-row"><span class="op">−</span>
-       <span class="nm"><span class="sw" style="background:${b.color};display:inline-block;vertical-align:middle;margin-right:7px"></span>${b.label}</span>
+       <span class="nm"><span class="sw" style="background:${b.color};display:inline-block;vertical-align:middle;margin-right:7px"></span>${b.label}<span class="sub">${fmtInt(v[b.key] || 0)} s</span></span>
        <span class="tv">${fmtMinutes(val(b.key))}</span></div>`).join('');
   const blanks = MANUAL_BUCKETS.filter(b => blank(b.key));
 
@@ -1208,17 +1356,18 @@ function calcManual(v) {
     callout = `<div class="callout ok"><div>✓ Toda a ineficiência do período está explicada por paradas, ociosidade e espera. Sem saldo para micro paradas.</div></div>`;
   } else {
     saldoNote = 'o que sobrou da ineficiência';
+    const saldo = `<b>${fmtMinutes(micro)}</b> (${fmtInt(microSec)} s)`;
     const acts = arr => `<div class="acts">${arr.join('')}</div>`;
-    const btn = (id, label) => `<button class="pick" data-add="${id}">↳ ${label}</button>`;
+    const btn = (id, label) => `<button class="pick" data-add="${id}">↳ ${label} +${fmtInt(microSec)} s</button>`;
     if (blanks.length === 1) {
       const b = blanks[0];
-      callout = `<div class="callout"><div>Sobram <b>${fmtMinutes(micro)}</b> sem apontamento. <b>${b.label}</b> é o único campo em branco — foi tudo para lá?</div>
+      callout = `<div class="callout"><div>Sobram ${saldo} sem apontamento. <b>${b.label}</b> é o único campo em branco — foi tudo para lá?</div>
         ${acts([btn(b.id, `Jogar tudo em ${b.label}`), `<button class="pick" data-micro="1">Não, é micro parada</button>`])}</div>`;
     } else if (blanks.length > 1) {
-      callout = `<div class="callout"><div>Sobram <b>${fmtMinutes(micro)}</b> sem apontamento e ${blanks.length} campos continuam em branco (${blanks.map(b => b.label.toLowerCase()).join(', ')}). Enquanto não forem preenchidos, o saldo conta como <b>micro paradas</b>.</div>
-        ${acts(blanks.map(b => btn(b.id, `Tudo em ${b.label}`)).concat(`<button class="pick" data-micro="1">É micro parada</button>`))}</div>`;
+      callout = `<div class="callout"><div>Sobram ${saldo} sem apontamento e ${blanks.length} campos continuam em branco (${blanks.map(b => b.label.toLowerCase()).join(', ')}). Enquanto não forem preenchidos, o saldo conta como <b>micro paradas</b>.</div>
+        ${acts(blanks.map(b => btn(b.id, b.label)).concat(`<button class="pick" data-micro="1">É micro parada</button>`))}</div>`;
     } else {
-      callout = `<div class="callout"><div>Com tudo apontado, sobram <b>${fmtMinutes(micro)}</b>: a máquina estava rodando, mas esse tempo não virou peça. É a conta de <b>micro paradas</b> — pequenas interrupções e ritmo reduzido que ninguém registra. Equivale a <b>${fmtInt(microPos * rate)} pçs</b> perdidas.</div></div>`;
+      callout = `<div class="callout"><div>Com tudo apontado, sobram ${saldo}: a máquina estava rodando, mas esse tempo não virou peça. É a conta de <b>micro paradas</b> — pequenas interrupções e ritmo reduzido que ninguém registra. Equivale a <b>${fmtInt(microPos * rate)} pçs</b> perdidas.</div></div>`;
     }
   }
 
@@ -1227,11 +1376,11 @@ function calcManual(v) {
       <div class="wf-row"><span class="op"></span><span class="nm">Tempo de ineficiência</span><span class="tv">${fmtMinutes(ineff)}</span></div>
       ${ledger}
       <div class="wf-row tot${micro < -MIN_EPS ? ' neg' : ''}"><span class="op">=</span>
-        <span class="nm"><span class="sw" style="background:#eb6834;display:inline-block;vertical-align:middle;margin-right:7px"></span>Micro paradas<span class="sub">${saldoNote}</span></span>
+        <span class="nm"><span class="sw" style="background:#eb6834;display:inline-block;vertical-align:middle;margin-right:7px"></span>Micro paradas<span class="sub">${saldoNote}${micro >= -MIN_EPS ? ` · ${fmtInt(microSec)} s` : ''}</span></span>
         <span class="tv">${fmtMinutes(micro)}</span></div>
     </div>${callout}`;
 
-  sug.querySelectorAll('[data-add]').forEach(b => b.onclick = () => manualAdd(b.dataset.add, micro));
+  sug.querySelectorAll('[data-add]').forEach(b => b.onclick = () => manualAdd(b.dataset.add, Math.round(micro * 60)));
   const mb = sug.querySelector('[data-micro]');
   if (mb) mb.onclick = () => { blanks.forEach(b => { $('#' + b.id).value = 0; }); manualRecalc(); };
 
@@ -1242,7 +1391,7 @@ function calcManual(v) {
      Performance     = máquina útil ÷ tempo rodando   (micro paradas pesam aqui)
      Qualidade       = peças boas ÷ produção total                            */
   const cfg = calcCfg();
-  const outMin = (cfg.idleCountsAsStop ? 0 : val('idle')) + (cfg.waitCountsAsStop ? 0 : val('wait'));
+  const outMin = (cfg.idleCountsAsStop ? 0 : val('idleS')) + (cfg.waitCountsAsStop ? 0 : val('waitS'));
   const baseMach = Math.max(0.0001, total - outMin);
   const A  = oper / total;
   const Am = oper / baseMach;
@@ -1261,9 +1410,9 @@ function calcManual(v) {
     ['Máquina útil — peças boas', utilGood, 'var(--st-prod)'],
     ['Máquina útil — refugo', utilScrap, 'var(--muted)'],
     ['Micro paradas (saldo)', microPos, '#eb6834'],
-    ['Paradas', val('stop'), 'var(--st-stop)'],
-    ['Ociosidade', val('idle'), 'var(--st-idle)'],
-    ['Esperando', val('wait'), 'var(--st-wait)'],
+    ['Paradas', val('stopS'), 'var(--st-stop)'],
+    ['Ociosidade', val('idleS'), 'var(--st-idle)'],
+    ['Esperando', val('waitS'), 'var(--st-wait)'],
   ].filter(s => s[1] > MIN_EPS);
 
   out.innerHTML = `
@@ -1319,7 +1468,7 @@ function calcManual(v) {
     const segs = [];
     let t = start;
     const push = (state, dur) => { if (dur > 0) { segs.push({ state, reason: null, kind: null, planned: null, start: t, end: t + dur * min }); t += dur * min; } };
-    push('prod', oper); push('stop', val('stop')); push('idle', val('idle')); push('wait', val('wait'));
+    push('prod', oper); push('stop', val('stopS')); push('idle', val('idleS')); push('wait', val('waitS'));
     db.sessions.push({ id: uid(), machineId: v.machineId, start, end: now, segs, theo, real, scrap, manual: true });
     save();
     goTab('dash');
