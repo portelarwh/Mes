@@ -48,13 +48,9 @@ Pages**: Settings → Pages → branch `main` → `/ (root)`.
    manutenção (MTBF, MTBB, MTTA, MTTR), distribuição do tempo, principais
    motivos de parada (com split planejadas × não planejadas) e resumo por
    máquina, com filtro de período (hoje / 7 / 30 dias / tudo).
-5. **Manual** → digite os dados de um período já encerrado (tempo total,
-   paradas, ocioso, espera, produção entregue e refugo) e veja o OEE na hora,
-   com a barra "para onde foi o tempo": a diferença entre o teórico do tempo
-   operando e o entregue vira o tempo equivalente de **microparadas / espera /
-   ritmo reduzido não apontados**. Ex.: 60min, 10min de parada, 10 pçs/min,
-   400 entregues → caberiam 500; os 100 que faltam = 10min perdidos. Dá para
-   salvar o cálculo como apontamento no Dashboard.
+5. **Manual** → digite os dados de um período já encerrado e veja o OEE na
+   hora, num raciocínio em cascata (detalhado abaixo). Dá para salvar o
+   cálculo como apontamento no Dashboard.
 6. **Relatório executivo** → botão no topo do Dashboard gera um relatório de
    uma página (A4 paisagem) com OEE real, Pareto de paradas, produção,
    manutenção, distribuição do tempo e tabela por máquina — exportável em
@@ -70,6 +66,55 @@ frente não puxou. Por isso o app mostra sempre dois números:
 - **OEE da máquina** — tira da base o que não é responsabilidade dela. Em
   **Máquinas → Cálculo do OEE** você decide se *Ociosa (sem insumo)* e
   *Esperando* contam como parada da máquina (padrão: não contam).
+
+## Aba Manual — máquina útil × ineficiência
+
+A aba Manual não pede que você feche a conta sozinho: ela **abre o tempo em
+cascata** e vai deduzindo conforme você aponta.
+
+**Passo 1 — período e produção.** Informe o **tempo de produção** (a janela em
+que a máquina esteve à sua disposição) e a **produção total**. Só com isso o
+app já mostra:
+
+- **Tempo de máquina útil** = produção total ÷ capacidade nominal — o tempo que
+  a produção realmente exigia da máquina. A **produção total inclui o refugo**:
+  a máquina trabalhou para fazer a peça ruim também, então esse tempo é máquina
+  útil (o refugo volta a pesar só na Qualidade). O app mostra à parte quanto do
+  útil foi embora em refugo.
+- **Tempo de ineficiência** = tempo de produção − máquina útil.
+
+**Passo 2 — de onde veio a ineficiência.** Cada valor que você digita em
+**paradas**, **ociosidade** e **esperando** é deduzido do tempo de ineficiência,
+ao vivo. O saldo que sobra cai automaticamente em **micro paradas** — o campo é
+calculado, não digitado.
+
+O app ainda sugere o destino do saldo:
+
+- **um único campo em branco** → "sobram 5min; *Esperando* é o único campo em
+  branco — foi tudo para lá?", com um botão para jogar o saldo nele e outro
+  para confirmar que é micro parada;
+- **vários campos em branco** → avisa quais faltam e oferece um botão por
+  campo; até você decidir, o saldo conta como micro paradas;
+- **tudo apontado** → o que sobrar de segundos ou minutos é micro parada, e o
+  app traduz isso em peças perdidas.
+
+**Passo 3 — resultado.** Sai o OEE já decomposto:
+
+| | |
+|---|---|
+| Disponibilidade | tempo rodando ÷ tempo de produção — pega paradas, ociosidade e espera |
+| Performance | máquina útil ÷ tempo rodando — pega as micro paradas |
+| Qualidade | peças boas ÷ produção total — pega o refugo |
+
+Ou seja: **OEE = tempo de máquina útil em peças boas ÷ tempo de produção**.
+
+O app também barra as duas incoerências clássicas: se a produção informada não
+cabe na janela (capacidade nominal subestimada) e se as paradas apontadas
+somam mais do que a ineficiência existente.
+
+Exemplo: 60min de janela, 10 pçs/min, 400 pçs produzidas (50 de refugo).
+Máquina útil = 40min → ineficiência = 20min. Apontou 10min de parada e 5min de
+ociosidade: sobram 5min, que viram micro paradas (= 50 pçs perdidas).
 
 ## Motivos de parada
 
@@ -100,8 +145,9 @@ destacado no Dashboard e no relatório executivo.
 | Qualidade | (real − refugo) ÷ real | ↑ |
 | **OEE real (linha)** | Disp. real × Performance × Qualidade | ≥ meta |
 | **OEE da máquina** | Disp. da máquina × Performance × Qualidade | ≥ meta |
-| Tempo efetivo | produção real ÷ capacidade nominal | — |
-| Microparadas | tempo produzindo − tempo efetivo | ↓ |
+| Tempo de máquina útil | produção total (refugo incluso) ÷ capacidade nominal | — |
+| Tempo de ineficiência | tempo de produção − máquina útil | ↓ |
+| Micro paradas | ineficiência − paradas − ociosidade − espera | ↓ |
 | MTBF | tempo produzindo ÷ nº de falhas (falhas + quebras) | ↑ |
 | MTBB | tempo produzindo ÷ nº de quebras (dano físico) | ↑ |
 | MTTA | média (chegada da manutenção − início da parada) | ↓ |

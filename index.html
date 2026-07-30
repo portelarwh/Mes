@@ -191,6 +191,35 @@
   .time-row .nm { flex: 1; color: var(--ink-2); }
   .time-row .tv { font-weight: 700; font-variant-numeric: tabular-nums; }
 
+  /* ---- cascata de tempo (manual) ---- */
+  .wf { display: grid; }
+  .wf-row {
+    display: flex; align-items: flex-start; gap: 8px; font-size: 14px;
+    padding: 8px 0; border-top: 1px solid var(--ring);
+  }
+  .wf-row:first-child { border-top: none; }
+  .wf-row .op { width: 14px; flex: none; color: var(--muted); font-weight: 800; text-align: center; }
+  .wf-row .nm { flex: 1; min-width: 0; color: var(--ink-2); }
+  .wf-row .nm .sub { display: block; font-size: 11.5px; color: var(--muted); font-weight: 400; margin-top: 2px; line-height: 1.35; }
+  .wf-row .tv { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .wf-row.tot {
+    border-top: none; margin-top: 6px; padding: 10px 12px;
+    background: var(--track); border-radius: 12px;
+  }
+  .wf-row.tot .nm { color: var(--ink); font-weight: 700; }
+  .wf-row.tot .tv { font-size: 16px; }
+  .wf-row.tot.neg .nm, .wf-row.tot.neg .tv { color: var(--bad); }
+
+  .callout {
+    border: 1px dashed var(--baseline); background: var(--page);
+    border-radius: 12px; padding: 11px 12px; font-size: 13px; color: var(--ink-2);
+    line-height: 1.45; display: grid; gap: 9px;
+  }
+  .callout.warn { border-style: solid; border-color: var(--bad); color: var(--bad); }
+  .callout.ok { border-color: var(--accent); }
+  .callout .acts { display: flex; flex-wrap: wrap; gap: 8px; }
+  .field input[readonly] { background: var(--track); color: var(--ink-2); border-style: dashed; }
+
   .btn {
     border-radius: 12px; padding: 14px; font-weight: 800; font-size: 15px;
     background: var(--accent); color: var(--btn-ink); width: 100%;
@@ -414,7 +443,7 @@
 /* =====================================================
    MES — Apontamento de produção, paradas e refugo
    ===================================================== */
-const APP_VERSION = '2.0.0';   // ⬅ suba a versão a cada atualização
+const APP_VERSION = '2.1.0';   // ⬅ suba a versão a cada atualização
 document.getElementById('verBadge').textContent = 'v' + APP_VERSION;
 
 const STATES = {
@@ -1002,85 +1031,226 @@ function tick() {
 /* =====================================================
    MANUAL — OEE a partir de dados digitados
    ===================================================== */
+/* tolerância: abaixo disso o saldo é considerado zerado (~0,3s) */
+const MIN_EPS = 0.005;
+/* minutos decimais → "1h 05min" / "12min 30s" / "18s" */
+function fmtMinutes(n) {
+  const neg = n < -0.0001;
+  let sec = Math.round(Math.abs(n) * 60);
+  const h = Math.floor(sec / 3600); sec -= h * 3600;
+  const mi = Math.floor(sec / 60), s = sec - mi * 60;
+  const txt = h > 0 ? `${h}h ${String(mi).padStart(2, '0')}min`
+    : mi > 0 ? (s > 0 ? `${mi}min ${String(s).padStart(2, '0')}s` : `${mi}min`)
+    : `${s}s`;
+  return (neg ? '−' : '') + txt;
+}
+
+/* campos de ineficiência apontáveis, na ordem em que aparecem na tela */
+const MANUAL_BUCKETS = [
+  { key: 'stop', id: 'inStop', label: 'Paradas',     color: 'var(--st-stop)' },
+  { key: 'idle', id: 'inIdle', label: 'Ociosidade',  color: 'var(--st-idle)' },
+  { key: 'wait', id: 'inWait', label: 'Esperando',   color: 'var(--st-wait)' },
+];
+let manualRecalc = () => {};
+
 function renderManual() {
   const el = $('#page-manual');
   const m = db.manual || {};
   el.innerHTML = `
     <div class="card">
-      <h2>Cálculo manual de OEE</h2>
-      <p class="hint" style="margin-bottom:12px">Digite os dados do período (sem cronômetro) e veja o OEE na hora. Ex.: em 60min você parou 10min, fez 400 pçs e 50 eram refugo.</p>
-      <div class="field"><label for="inMach">Máquina (para usar a capacidade cadastrada e poder salvar)</label>
+      <h2>1 · Período e produção</h2>
+      <p class="hint" style="margin-bottom:12px">Informe o <b>tempo de produção</b> (a janela em que a máquina esteve à disposição) e a <b>produção total</b>. O app separa quanto disso foi <b>máquina útil</b> e quanto foi <b>ineficiência</b>.</p>
+      <div class="field"><label for="inMach">Máquina (usa a capacidade cadastrada e permite salvar)</label>
         <select id="inMach"><option value="">— sem máquina —</option>
           ${db.machines.map(x => `<option value="${x.id}" ${m.machineId === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}
         </select></div>
-      <div class="field"><label for="inRate">Capacidade nominal (peças por minuto)</label>
-        <input id="inRate" type="number" inputmode="decimal" min="0.01" step="any" placeholder="Ex.: 10" value="${m.rate ?? ''}"></div>
       <div class="kpi-row" style="margin-bottom:12px">
-        <div class="field" style="margin:0"><label for="inTotal">Tempo total (min)</label>
+        <div class="field" style="margin:0"><label for="inRate">Capacidade nominal (pçs/min)</label>
+          <input id="inRate" type="number" inputmode="decimal" min="0.01" step="any" placeholder="Ex.: 10" value="${m.rate ?? ''}"></div>
+        <div class="field" style="margin:0"><label for="inTotal">Tempo de produção (min)</label>
           <input id="inTotal" type="number" inputmode="decimal" min="1" step="any" placeholder="Ex.: 60" value="${m.total ?? ''}"></div>
-        <div class="field" style="margin:0"><label for="inStop">Paradas (min)</label>
-          <input id="inStop" type="number" inputmode="decimal" min="0" step="any" placeholder="Ex.: 10" value="${m.stop ?? ''}"></div>
-      </div>
-      <div class="kpi-row" style="margin-bottom:12px">
-        <div class="field" style="margin:0"><label for="inIdle">Ocioso — sem insumo (min)</label>
-          <input id="inIdle" type="number" inputmode="decimal" min="0" step="any" placeholder="0" value="${m.idle ?? ''}"></div>
-        <div class="field" style="margin:0"><label for="inWait">Esperando linha (min)</label>
-          <input id="inWait" type="number" inputmode="decimal" min="0" step="any" placeholder="0" value="${m.wait ?? ''}"></div>
       </div>
       <div class="kpi-row">
-        <div class="field" style="margin:0"><label for="inReal">Produção entregue (pçs)</label>
+        <div class="field" style="margin:0"><label for="inReal">Produção total (pçs)</label>
           <input id="inReal" type="number" inputmode="numeric" min="0" placeholder="Ex.: 400" value="${m.real ?? ''}"></div>
         <div class="field" style="margin:0"><label for="inScrap">Refugo (pçs)</label>
           <input id="inScrap" type="number" inputmode="numeric" min="0" placeholder="Ex.: 50" value="${m.scrap ?? ''}"></div>
       </div>
+      <p class="hint" style="margin-top:10px">A <b>produção total</b> já inclui o refugo — a máquina trabalhou para fazer a peça ruim também, então esse tempo é máquina útil. O refugo volta a pesar só na Qualidade.</p>
+    </div>
+
+    <div class="card">
+      <h2>2 · De onde veio a ineficiência</h2>
+      <div id="balanceOut"></div>
+      <div class="kpi-row" style="margin:14px 0 12px">
+        <div class="field" style="margin:0"><label for="inStop">Paradas (min)</label>
+          <input id="inStop" type="number" inputmode="decimal" min="0" step="any" placeholder="em branco" value="${m.stop ?? ''}"></div>
+        <div class="field" style="margin:0"><label for="inIdle">Ociosidade — sem insumo (min)</label>
+          <input id="inIdle" type="number" inputmode="decimal" min="0" step="any" placeholder="em branco" value="${m.idle ?? ''}"></div>
+      </div>
+      <div class="kpi-row">
+        <div class="field" style="margin:0"><label for="inWait">Esperando linha (min)</label>
+          <input id="inWait" type="number" inputmode="decimal" min="0" step="any" placeholder="em branco" value="${m.wait ?? ''}"></div>
+        <div class="field" style="margin:0"><label for="inMicro">Micro paradas (min) · saldo</label>
+          <input id="inMicro" type="text" readonly tabindex="-1" placeholder="—"></div>
+      </div>
+      <div id="suggestOut" style="margin-top:14px"></div>
     </div>
     <div id="manualOut"></div>`;
 
   const ids = ['inRate', 'inTotal', 'inStop', 'inIdle', 'inWait', 'inReal', 'inScrap'];
+  const numOf = id => { const n = parseFloat($('#' + id).value); return isFinite(n) ? n : null; };
   const readInputs = () => ({
     machineId: $('#inMach').value || null,
-    rate: parseFloat($('#inRate').value),
-    total: parseFloat($('#inTotal').value),
-    stop: parseFloat($('#inStop').value) || 0,
-    idle: parseFloat($('#inIdle').value) || 0,
-    wait: parseFloat($('#inWait').value) || 0,
-    real: parseFloat($('#inReal').value),
-    scrap: parseFloat($('#inScrap').value) || 0,
+    rate: numOf('inRate'),
+    total: numOf('inTotal'),
+    stop: numOf('inStop'),   /* null = campo em branco (≠ zero apontado) */
+    idle: numOf('inIdle'),
+    wait: numOf('inWait'),
+    real: numOf('inReal'),
+    scrap: numOf('inScrap'),
   });
-  const recalc = () => {
+  manualRecalc = () => {
     db.manual = readInputs(); save();
     calcManual(db.manual);
   };
-  ids.forEach(id => $('#' + id).oninput = recalc);
+  ids.forEach(id => $('#' + id).oninput = manualRecalc);
   $('#inMach').onchange = () => {
     const mm = machineById($('#inMach').value);
     if (mm) $('#inRate').value = mm.rate;
-    recalc();
+    manualRecalc();
   };
-  recalc();
+  manualRecalc();
+}
+
+/* joga `add` minutos no campo `id` (somando ao que já estiver lá) */
+function manualAdd(id, add) {
+  const el = $('#' + id); if (!el) return;
+  const cur = parseFloat(el.value);
+  el.value = +(((isFinite(cur) ? cur : 0) + add).toFixed(2));
+  manualRecalc();
 }
 
 function calcManual(v) {
-  const out = $('#manualOut'); if (!out) return;
-  const valid = v.rate > 0 && v.total > 0 && v.real >= 0 && !isNaN(v.real);
-  if (!valid) { out.innerHTML = '<div class="card"><p class="hint">Preencha capacidade, tempo total e produção entregue para calcular.</p></div>'; return; }
-  const down = v.stop + v.idle + v.wait;
-  if (down > v.total) { out.innerHTML = '<div class="card"><p class="hint">⚠️ Paradas + ocioso + espera não podem passar do tempo total.</p></div>'; return; }
-  const scrap = Math.min(v.scrap || 0, v.real);
-  const oper = v.total - down;              /* tempo operando */
-  const theo = v.rate * oper;               /* teórica no tempo operando */
+  const bal = $('#balanceOut'), sug = $('#suggestOut'), micEl = $('#inMicro'), out = $('#manualOut');
+  if (!out) return;
+
+  const rate = v.rate, total = v.total, real = v.real;
+  if (!(rate > 0 && total > 0 && real != null && real >= 0)) {
+    if (bal) bal.innerHTML = '<p class="hint">Preencha <b>capacidade nominal</b>, <b>tempo de produção</b> e <b>produção total</b> — o app calcula na hora o tempo de máquina útil e o tempo de ineficiência.</p>';
+    if (sug) sug.innerHTML = '';
+    if (micEl) micEl.value = '';
+    out.innerHTML = '<div class="card"><p class="hint">Aguardando os dados do período para calcular o OEE.</p></div>';
+    return;
+  }
+
+  /* ---- núcleo do raciocínio ---------------------------------------------
+     tempo de produção (janela) = máquina útil + ineficiência
+     máquina útil  = produção total ÷ capacidade nominal   (refugo incluso!)
+     ineficiência  = paradas + ociosidade + espera + micro paradas          */
+  const scrap    = Math.min(Math.max(0, v.scrap || 0), real);
+  const good     = real - scrap;
+  const util     = real / rate;             /* tempo de máquina útil */
+  const utilGood = good / rate;
+  const utilScrap = util - utilGood;
+  const ineff    = total - util;            /* tempo de ineficiência */
+
+  const val   = k => (v[k] == null ? 0 : Math.max(0, v[k]));
+  const blank = k => v[k] == null;
+  const declared = MANUAL_BUCKETS.reduce((a, b) => a + val(b.key), 0);
+  const micro    = ineff - declared;        /* saldo → micro paradas */
+  const microPos = Math.max(0, micro);
+  const oper     = total - declared;        /* tempo rodando = útil + micro */
+
+  if (micEl) micEl.value = ineff >= -MIN_EPS && micro >= -MIN_EPS ? fmtMinutes(microPos) : '—';
+
+  /* ---- cascata: janela → útil → ineficiência ---- */
+  bal.innerHTML = `
+    <div class="wf">
+      <div class="wf-row"><span class="op"></span>
+        <span class="nm">Tempo de produção<span class="sub">janela apontada</span></span>
+        <span class="tv">${fmtMinutes(total)}</span></div>
+      <div class="wf-row"><span class="op">−</span>
+        <span class="nm">Tempo de máquina útil<span class="sub">${fmtInt(real)} pçs ÷ ${rate} pçs/min${scrap > 0 ? ` · ${fmtMinutes(utilScrap)} foram para o refugo` : ''}</span></span>
+        <span class="tv">${fmtMinutes(util)}</span></div>
+      <div class="wf-row tot${ineff < -MIN_EPS ? ' neg' : ''}"><span class="op">=</span>
+        <span class="nm">Tempo de ineficiência<span class="sub">${ineff < -MIN_EPS
+          ? 'negativo: a produção informada não cabe na janela'
+          : `${pct(total > 0 ? ineff / total : 0, 1)} da janela · distribua abaixo`}</span></span>
+        <span class="tv">${fmtMinutes(ineff)}</span></div>
+    </div>`;
+
+  /* ---- erros que impedem a distribuição ---- */
+  if (ineff < -MIN_EPS) {
+    sug.innerHTML = `<div class="callout warn"><div>⚠️ <b>${fmtInt(real)} pçs</b> a ${rate} pçs/min exigem <b>${fmtMinutes(util)}</b> de máquina, mais que os ${fmtMinutes(total)} da janela. Não há ineficiência para distribuir — confira a <b>capacidade nominal</b> (provavelmente está subestimada) ou o tempo de produção.</div></div>`;
+    out.innerHTML = `<div class="card"><p class="hint">Corrija os dados acima para ver o OEE.</p></div>`;
+    return;
+  }
+  if (declared > total + MIN_EPS) {
+    sug.innerHTML = `<div class="callout warn"><div>⚠️ Paradas + ociosidade + espera somam <b>${fmtMinutes(declared)}</b> e passam do tempo de produção (${fmtMinutes(total)}).</div></div>`;
+    out.innerHTML = `<div class="card"><p class="hint">Corrija os apontamentos acima para ver o OEE.</p></div>`;
+    return;
+  }
+
+  /* ---- ledger da dedução + sugestão do saldo ---- */
+  const ledger = MANUAL_BUCKETS.filter(b => !blank(b.key) || val(b.key) > 0).map(b =>
+    `<div class="wf-row"><span class="op">−</span>
+       <span class="nm"><span class="sw" style="background:${b.color};display:inline-block;vertical-align:middle;margin-right:7px"></span>${b.label}</span>
+       <span class="tv">${fmtMinutes(val(b.key))}</span></div>`).join('');
+  const blanks = MANUAL_BUCKETS.filter(b => blank(b.key));
+
+  let saldoNote, callout = '';
+  if (micro < -MIN_EPS) {
+    saldoNote = 'apontado a mais do que a ineficiência';
+    callout = `<div class="callout warn"><div>⚠️ Você apontou <b>${fmtMinutes(-micro)}</b> a mais do que a ineficiência do período. Só sobrariam ${fmtMinutes(oper)} rodando para fazer ${fmtInt(real)} pçs, que exigem ${fmtMinutes(util)}. Reduza os apontamentos ou revise a capacidade nominal.</div></div>`;
+  } else if (micro <= MIN_EPS) {
+    saldoNote = 'ineficiência 100% apontada';
+    callout = `<div class="callout ok"><div>✓ Toda a ineficiência do período está explicada por paradas, ociosidade e espera. Sem saldo para micro paradas.</div></div>`;
+  } else {
+    saldoNote = 'o que sobrou da ineficiência';
+    const acts = arr => `<div class="acts">${arr.join('')}</div>`;
+    const btn = (id, label) => `<button class="pick" data-add="${id}">↳ ${label}</button>`;
+    if (blanks.length === 1) {
+      const b = blanks[0];
+      callout = `<div class="callout"><div>Sobram <b>${fmtMinutes(micro)}</b> sem apontamento. <b>${b.label}</b> é o único campo em branco — foi tudo para lá?</div>
+        ${acts([btn(b.id, `Jogar tudo em ${b.label}`), `<button class="pick" data-micro="1">Não, é micro parada</button>`])}</div>`;
+    } else if (blanks.length > 1) {
+      callout = `<div class="callout"><div>Sobram <b>${fmtMinutes(micro)}</b> sem apontamento e ${blanks.length} campos continuam em branco (${blanks.map(b => b.label.toLowerCase()).join(', ')}). Enquanto não forem preenchidos, o saldo conta como <b>micro paradas</b>.</div>
+        ${acts(blanks.map(b => btn(b.id, `Tudo em ${b.label}`)).concat(`<button class="pick" data-micro="1">É micro parada</button>`))}</div>`;
+    } else {
+      callout = `<div class="callout"><div>Com tudo apontado, sobram <b>${fmtMinutes(micro)}</b>: a máquina estava rodando, mas esse tempo não virou peça. É a conta de <b>micro paradas</b> — pequenas interrupções e ritmo reduzido que ninguém registra. Equivale a <b>${fmtInt(microPos * rate)} pçs</b> perdidas.</div></div>`;
+    }
+  }
+
+  sug.innerHTML = `
+    <div class="wf" style="margin-bottom:${callout ? '12px' : '0'}">
+      <div class="wf-row"><span class="op"></span><span class="nm">Tempo de ineficiência</span><span class="tv">${fmtMinutes(ineff)}</span></div>
+      ${ledger}
+      <div class="wf-row tot${micro < -MIN_EPS ? ' neg' : ''}"><span class="op">=</span>
+        <span class="nm"><span class="sw" style="background:#eb6834;display:inline-block;vertical-align:middle;margin-right:7px"></span>Micro paradas<span class="sub">${saldoNote}</span></span>
+        <span class="tv">${fmtMinutes(micro)}</span></div>
+    </div>${callout}`;
+
+  sug.querySelectorAll('[data-add]').forEach(b => b.onclick = () => manualAdd(b.dataset.add, micro));
+  const mb = sug.querySelector('[data-micro]');
+  if (mb) mb.onclick = () => { blanks.forEach(b => { $('#' + b.id).value = 0; }); manualRecalc(); };
+
+  if (micro < -MIN_EPS) { out.innerHTML = `<div class="card"><p class="hint">Ajuste os apontamentos para ver o OEE.</p></div>`; return; }
+
+  /* ---- OEE --------------------------------------------------------------
+     Disponibilidade = tempo rodando ÷ janela
+     Performance     = máquina útil ÷ tempo rodando   (micro paradas pesam aqui)
+     Qualidade       = peças boas ÷ produção total                            */
   const cfg = calcCfg();
-  const outMin = (cfg.idleCountsAsStop ? 0 : v.idle) + (cfg.waitCountsAsStop ? 0 : v.wait);
-  const baseMach = Math.max(0.0001, v.total - outMin);
-  const A = oper / v.total;
+  const outMin = (cfg.idleCountsAsStop ? 0 : val('idle')) + (cfg.waitCountsAsStop ? 0 : val('wait'));
+  const baseMach = Math.max(0.0001, total - outMin);
+  const A  = oper / total;
   const Am = oper / baseMach;
-  const P = theo > 0 ? v.real / theo : 0;
-  const Q = v.real > 0 ? (v.real - scrap) / v.real : 0;
-  const oee = A * P * Q;
+  const P  = oper > 0 ? Math.min(1, util / oper) : 0;
+  const Q  = real > 0 ? good / real : 0;
+  const oee  = A * P * Q;
   const oeeM = Am * P * Q;
-  const lostPcs = theo - v.real;            /* peças que faltaram */
-  const lostMin = lostPcs / v.rate;         /* tempo equivalente perdido */
-  const effMin = Math.min(oper, v.real / v.rate); /* tempo efetivo de produção */
+  const theo = rate * oper;                 /* teórica no tempo rodando */
 
   const mm2 = machineById(v.machineId);
   const target = mm2 ? targetOf(mm2) : DEFAULT_OEE_TARGET;
@@ -1088,50 +1258,56 @@ function calcManual(v) {
 
   /* barra: para onde foi o tempo */
   const segsBar = [
-    ['Produção efetiva', effMin, 'var(--st-prod)'],
-    ['Microparadas / espera / ritmo (não apontado)', Math.max(0, lostMin), '#eb6834'],
-    ['Paradas', v.stop, 'var(--st-stop)'],
-    ['Ocioso', v.idle, 'var(--st-idle)'],
-    ['Esperando', v.wait, 'var(--st-wait)'],
-  ].filter(s => s[1] > 0.001);
+    ['Máquina útil — peças boas', utilGood, 'var(--st-prod)'],
+    ['Máquina útil — refugo', utilScrap, 'var(--muted)'],
+    ['Micro paradas (saldo)', microPos, '#eb6834'],
+    ['Paradas', val('stop'), 'var(--st-stop)'],
+    ['Ociosidade', val('idle'), 'var(--st-idle)'],
+    ['Esperando', val('wait'), 'var(--st-wait)'],
+  ].filter(s => s[1] > MIN_EPS);
 
   out.innerHTML = `
     <div class="card">
-      <h2>Resultado</h2>
+      <h2>3 · Resultado</h2>
       <div class="gauge-grid">
         <div class="gauge gauge-hero">${donutSVG(oeeM, 'OEE máquina', 'MÁQUINA', oeeM * 100 >= target ? 'var(--good)' : 'var(--bad)')}
           <span class="glabel">OEE da máquina</span>
           <span class="gmeta">meta ${target.toFixed(0)}% · ${oeeM * 100 >= target ? '✓ atingida' : 'abaixo'}</span></div>
         <div class="gauge gauge-hero">${donutSVG(oee, 'OEE real', 'REAL', okMeta ? 'var(--good)' : 'var(--bad)')}
           <span class="glabel">OEE real (linha)</span>
-          <span class="gmeta">${outMin > 0 ? `inclui ${fmtInt(outMin)}min de fora` : 'toda a janela'}</span></div>
+          <span class="gmeta">${outMin > MIN_EPS ? `inclui ${fmtMinutes(outMin)} de fora` : 'toda a janela'}</span></div>
         <div class="gauge">${donutSVG(Am, 'Disponibilidade da máquina')}<span class="glabel">Disp. máquina</span>
           <span class="gmeta">real ${pct(A, 0)}</span></div>
-        <div class="gauge">${donutSVG(P, 'Performance')}<span class="glabel">Performance</span></div>
-        <div class="gauge">${donutSVG(Q, 'Qualidade')}<span class="glabel">Qualidade</span></div>
+        <div class="gauge">${donutSVG(P, 'Performance')}<span class="glabel">Performance</span>
+          <span class="gmeta">micro paradas</span></div>
+        <div class="gauge">${donutSVG(Q, 'Qualidade')}<span class="glabel">Qualidade</span>
+          <span class="gmeta">${scrap > 0 ? `${fmtInt(scrap)} refugo` : 'sem refugo'}</span></div>
       </div>
+      <div class="kpi-row" style="margin-top:14px">
+        <div class="kpi"><div class="k">MÁQUINA ÚTIL</div><div class="v">${fmtMinutes(util)}</div></div>
+        <div class="kpi"><div class="k">INEFICIÊNCIA</div><div class="v">${fmtMinutes(ineff)}</div></div>
+      </div>
+      <p class="hint" style="margin-top:10px">O OEE de ${pct(oee, 1)} é exatamente <b>${fmtMinutes(utilGood)}</b> de máquina útil em peças boas dentro de <b>${fmtMinutes(total)}</b> de janela.</p>
     </div>
     <div class="card">
-      <h2>Para onde foi o tempo (${fmtInt(v.total)}min)</h2>
+      <h2>Para onde foi o tempo (${fmtMinutes(total)})</h2>
       <div class="stackbar">${segsBar.map(s => `<div style="flex:${s[1]};background:${s[2]}" title="${s[0]}"></div>`).join('')}</div>
       <div style="height:12px"></div>
       <div class="time-list">
         ${segsBar.map(s => `<div class="time-row"><span class="sw" style="background:${s[2]}"></span>
-          <span class="nm">${s[0]}</span><span class="tv">${s[1].toFixed(1).replace('.', ',')}min</span></div>`).join('')}
+          <span class="nm">${s[0]}</span><span class="tv">${fmtMinutes(s[1])}</span></div>`).join('')}
       </div>
       <p class="hint" style="margin-top:12px">
-        Operando ${fmtInt(oper)}min × ${v.rate} pçs/min = <b>${fmtInt(theo)} pçs teóricas</b>. Você entregou <b>${fmtInt(v.real)}</b>${scrap ? ` (${fmtInt(scrap)} de refugo)` : ''} —
-        ${lostPcs > 0.5
-          ? `faltaram <b>${fmtInt(lostPcs)} pçs</b>, o equivalente a <b class="diff-neg">${lostMin.toFixed(1).replace('.', ',')}min</b> de microparadas, espera, ociosidade ou ritmo reduzido que não foram apontados.`
-          : lostPcs < -0.5
-            ? `<b class="diff-pos">${fmtInt(-lostPcs)} pçs acima do teórico</b> — confira a capacidade nominal.`
-            : 'em linha com o teórico. 🎯'}
+        Rodando ${fmtMinutes(oper)} × ${rate} pçs/min = <b>${fmtInt(theo)} pçs teóricas</b>; você entregou <b>${fmtInt(real)}</b>${scrap ? ` (${fmtInt(scrap)} de refugo)` : ''}.
+        ${microPos > MIN_EPS
+          ? `As <b>${fmtInt(theo - real)} pçs</b> que faltaram são as <b class="diff-neg">${fmtMinutes(microPos)}</b> de micro paradas — máquina ligada sem produzir na capacidade.`
+          : 'A máquina rodou na capacidade nominal o tempo todo em que esteve ligada. 🎯'}
       </p>
     </div>
     <div class="card">
       <h2>Salvar</h2>
       ${v.machineId
-        ? '<button class="btn" id="manualSave">💾 Salvar como apontamento no Dashboard</button><p class="hint" style="margin-top:8px">Entra no período atual com os tempos e a produção informados (a perda de performance permanece como performance).</p>'
+        ? '<button class="btn" id="manualSave">💾 Salvar como apontamento no Dashboard</button><p class="hint" style="margin-top:8px">Entra no período atual com os tempos informados; as micro paradas ficam dentro do tempo de produção e aparecem como perda de performance.</p>'
         : '<p class="hint">Escolha uma máquina acima para poder salvar este cálculo como apontamento.</p>'}
     </div>`;
 
@@ -1139,12 +1315,12 @@ function calcManual(v) {
   if (sv) sv.onclick = () => {
     const now = Date.now();
     const min = 60000;
-    const start = now - v.total * min;
+    const start = now - total * min;
     const segs = [];
     let t = start;
     const push = (state, dur) => { if (dur > 0) { segs.push({ state, reason: null, kind: null, planned: null, start: t, end: t + dur * min }); t += dur * min; } };
-    push('prod', oper); push('stop', v.stop); push('idle', v.idle); push('wait', v.wait);
-    db.sessions.push({ id: uid(), machineId: v.machineId, start, end: now, segs, theo, real: v.real, scrap, manual: true });
+    push('prod', oper); push('stop', val('stop')); push('idle', val('idle')); push('wait', val('wait'));
+    db.sessions.push({ id: uid(), machineId: v.machineId, start, end: now, segs, theo, real, scrap, manual: true });
     save();
     goTab('dash');
   };
