@@ -88,6 +88,23 @@ app já mostra:
 ao vivo. O saldo que sobra cai automaticamente em **micro paradas** — o campo é
 calculado, não digitado.
 
+Esses três campos são apontados em **segundos**, porque parada de chão de
+fábrica se mede em segundos. Para não obrigar o operador a converter na mão:
+
+- o campo aceita **`330`**, **`5:30`** (mm:ss), **`1:05:30`** (h:mm:ss),
+  **`5min`** ou **`5m30s`** — e mostra logo abaixo o que entendeu
+  (*= 5min 30s · 330 s*);
+- o botão **🧮** ao lado de cada campo abre a **calculadora de tempo**: informe
+  a duração de uma parada (nos campos *minutos* e *segundos*, ou escrevendo
+  `5:30` direto no campo de minutos) e **quantas vezes** ela aconteceu, toque em
+  ＋ e ela entra na lista. Há atalhos de +15s, +30s, +1min, +2min, +5min e
+  +10min. No fim a calculadora mostra o total nos três formatos (segundos,
+  `5min 30s` e `5:30`) e você escolhe **somar ao campo** ou **substituir** o
+  valor dele.
+
+Ex.: três paradas de 5:30 mais uma de 45s → a calculadora devolve **1.035 s**
+(17min 15s) para o campo Paradas.
+
 O app ainda sugere o destino do saldo:
 
 - **um único campo em branco** → "sobram 5min; *Esperando* é o único campo em
@@ -113,8 +130,8 @@ cabe na janela (capacidade nominal subestimada) e se as paradas apontadas
 somam mais do que a ineficiência existente.
 
 Exemplo: 60min de janela, 10 pçs/min, 400 pçs produzidas (50 de refugo).
-Máquina útil = 40min → ineficiência = 20min. Apontou 10min de parada e 5min de
-ociosidade: sobram 5min, que viram micro paradas (= 50 pçs perdidas).
+Máquina útil = 40min → ineficiência = 20min. Apontou 600s de parada e 300s de
+ociosidade: sobram 300s, que viram micro paradas (= 50 pçs perdidas).
 
 ## Motivos de parada
 
@@ -147,7 +164,7 @@ destacado no Dashboard e no relatório executivo.
 | **OEE da máquina** | Disp. da máquina × Performance × Qualidade | ≥ meta |
 | Tempo de máquina útil | produção total (refugo incluso) ÷ capacidade nominal | — |
 | Tempo de ineficiência | tempo de produção − máquina útil | ↓ |
-| Micro paradas | ineficiência − paradas − ociosidade − espera | ↓ |
+| Micro paradas | ineficiência − paradas − ociosidade − espera (apontados em segundos) | ↓ |
 | MTBF | tempo produzindo ÷ nº de falhas (falhas + quebras) | ↑ |
 | MTBB | tempo produzindo ÷ nº de quebras (dano físico) | ↑ |
 | MTTA | média (chegada da manutenção − início da parada) | ↓ |
