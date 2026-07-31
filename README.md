@@ -190,4 +190,13 @@ Sem o toque em “Manutenção chegou”, a parada inteira conta como reparo
 ```
 index.html     app completo (HTML + CSS + JS)
 manifest.json  metadados PWA (instalar na tela inicial)
+supabase/      schema do banco em SQL (migrations + teste de RLS)
 ```
+
+## Banco na nuvem (em migração)
+
+O app ainda guarda tudo no `localStorage` — nada nele fala com o Supabase por
+enquanto. O que já existe é o **schema versionado** em `supabase/`: plantas,
+máquinas, motivos, apontamentos e marcações, com RLS isolando uma planta da
+outra. Veja [`supabase/README.md`](supabase/README.md) para aplicar, criar a
+primeira planta e rodar o teste de isolamento.
