@@ -193,10 +193,20 @@ manifest.json  metadados PWA (instalar na tela inicial)
 supabase/      schema do banco em SQL (migrations + teste de RLS)
 ```
 
-## Banco na nuvem (em migração)
+## Nuvem (em migração)
 
-O app ainda guarda tudo no `localStorage` — nada nele fala com o Supabase por
-enquanto. O que já existe é o **schema versionado** em `supabase/`: plantas,
-máquinas, motivos, apontamentos e marcações, com RLS isolando uma planta da
-outra. Veja [`supabase/README.md`](supabase/README.md) para aplicar, criar a
-primeira planta e rodar o teste de isolamento.
+Os apontamentos **ainda ficam só no aparelho** — nada sobe para a nuvem por
+enquanto. O que já existe:
+
+- **Schema versionado** em `supabase/` — plantas, máquinas, motivos,
+  apontamentos e marcações, com RLS isolando uma planta da outra. Veja
+  [`supabase/README.md`](supabase/README.md) para aplicar e testar.
+- **Conta e planta** — em *Máquinas → Conta na nuvem* dá para entrar, criar
+  uma planta ou entrar numa existente pelo código, e testar a conexão. O
+  indicador **nuvem** no topo fica verde quando o aparelho está vinculado a
+  uma planta, e leva ao card com um toque.
+
+O app funciona por completo **sem login e sem internet**: nada é buscado na
+rede ao abrir, e falha de conexão vira mensagem no card, nunca tela travada.
+A chave que vai no `index.html` é a *publishable* do Supabase, pública por
+natureza — quem protege os dados é o RLS.

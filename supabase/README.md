@@ -98,8 +98,19 @@ fase de sync offline, em vez de um aparelho sobrescrever a base do outro.
 **Tema e período do filtro não sobem.** São preferência do aparelho, não
 configuração da planta — continuam no `localStorage`.
 
-## Fora do escopo desta etapa
+## Cliente
 
-Cliente, login e sincronização. O app continua 100% `localStorage`; nada nele
-fala com o Supabase ainda. As próximas etapas são: camada de acesso + login,
-migração one-shot da base local, outbox de sync e service worker.
+O `index.html` já traz a camada de acesso (seção **NUVEM** no `<script>`):
+`fetch` puro sobre GoTrue e PostgREST, sem SDK — o app não tem dependências e
+precisa abrir offline. Ela cobre entrar/criar conta, renovar o token, chamar
+RPC e ler tabelas, e a tela fica em *Máquinas → Conta na nuvem*.
+
+Pelo app, criar a planta e pegar o código é um botão: não precisa chamar as
+RPCs à mão.
+
+## Fora do escopo até aqui
+
+**Sincronização.** O app continua rodando 100% do `localStorage`; a conta está
+ligada mas nenhum apontamento sobe. As próximas etapas são: migração one-shot
+da base local, outbox de sync (last-write-wins por linha, usando `updated_at`)
+e service worker.
