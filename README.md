@@ -184,7 +184,37 @@ Sem o toque em “Manutenção chegou”, a parada inteira conta como reparo
 - **Dados no aparelho** — tudo fica em `localStorage`; funciona offline. Um
   apontamento em andamento sobrevive a recarregar a página (os tempos são
   derivados de timestamps).
-- **Instalável** — `manifest.json` permite “Adicionar à tela inicial”.
+- **Instalável como app de verdade** — ver abaixo.
+
+## Instalação — app, não atalho
+
+No Android, o Chrome só gera um **WebAPK** (app de verdade: ícone próprio, sem
+barra de endereço, entrada na gaveta de apps) quando o site cumpre todos os
+critérios de instalabilidade. Faltando qualquer um, ele cai no **atalho**, que
+é só um marcador para a URL.
+
+O que o app precisa ter — e tem:
+
+| Critério | Onde |
+|---|---|
+| HTTPS | GitHub Pages |
+| `manifest.json` com `name`, `short_name`, `start_url`, `scope`, `display: standalone` | `manifest.json` |
+| Ícone **PNG** de **192×192 e 512×512** | `assets/icon-192.png`, `assets/icon-512.png` |
+| Ícones `maskable` (o Android recorta em círculo/squircle) | `assets/icon-maskable-*.png` |
+| Service worker com handler de `fetch` | `sw.js` |
+
+⚠️ O ponto que costuma passar batido é o ícone: **SVG não serve**. O Chrome
+precisa de PNG raster nos dois tamanhos para montar o WebAPK — com só um ícone
+SVG o site parece um PWA no DevTools e mesmo assim instala como atalho.
+
+Cumpridos os critérios, o navegador dispara `beforeinstallprompt` e o app
+mostra o convite: um **banner dispensável** e um card **Instalação** na aba
+Máquinas com o botão *Instalar app*. Se já estiver rodando instalado, o card
+diz isso e nenhum convite aparece. No iPhone (que não tem o evento) o card
+explica o caminho manual: *Compartilhar → Adicionar à Tela de Início*.
+
+Para conferir num aparelho: toque no número da versão no topo — o pop-up
+mostra **“como está aberto agora”**, com *app instalado* ou *navegador*.
 
 ## Versão e atualização automática
 
@@ -224,7 +254,8 @@ nunca entram no cache.
 ```
 index.html     app completo (HTML + CSS + JS)
 sw.js          service worker (cache offline + atualização automática)
-manifest.json  metadados PWA (instalar na tela inicial)
+manifest.json  metadados PWA (instalação como app)
+assets/        ícones PNG do app (192, 512, maskable e apple-touch)
 supabase/      schema do banco em SQL (migrations + teste de RLS)
 ```
 
