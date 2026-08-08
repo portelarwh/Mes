@@ -176,18 +176,72 @@ Sem o toque em “Manutenção chegou”, a parada inteira conta como reparo
 ## Recursos
 
 - **Tema claro e escuro** (botão ◐ no topo; segue o sistema por padrão).
-- **Versão no topo direito** — constante `APP_VERSION` no início do
-  `<script>` do `index.html`. **Suba o número a cada atualização.**
+- **Versão clicável no topo direito** — abre um pop-up com a versão instalada,
+  a data de publicação, a última verificação e um botão **Verificar agora**.
+- **Atualização automática** — ver abaixo.
 - **Tela sempre acesa** enquanto o app está aberto (Wake Lock API; requer
   HTTPS — o indicador “tela” fica verde quando ativo).
-- **Dados no aparelho** — tudo fica em `localStorage`; funciona offline após
-  o primeiro carregamento. Um apontamento em andamento sobrevive a recarregar
-  a página (os tempos são derivados de timestamps).
+- **Dados no aparelho** — tudo fica em `localStorage`; funciona offline. Um
+  apontamento em andamento sobrevive a recarregar a página (os tempos são
+  derivados de timestamps).
 - **Instalável** — `manifest.json` permite “Adicionar à tela inicial”.
+
+## Versão e atualização automática
+
+⚠️ **Regra permanente — a cada mudança publicada, mexa nos três:**
+
+| Onde | O quê |
+|---|---|
+| `index.html` | `var APP_VERSION = 'X.Y.Z'` |
+| `index.html` | `var APP_RELEASE_DATE = 'AAAA-MM-DD'` (data da publicação) |
+| `sw.js` | `const CACHE_NAME = 'mes-vX.Y.Z'` — **o mesmo número** |
+
+Esquecer o `CACHE_NAME` é o erro clássico: o aparelho com o PWA instalado
+continua servindo a versão velha, porque é a troca do nome do cache que
+dispara a instalação do novo service worker.
+
+O `APP_VERSION` é fonte única — cabeçalho, tela Sobre e relatório executivo
+leem dele. Nunca escreva o número na mão em outro lugar.
+
+**Como a atualização chega ao aparelho.** O `sw.js` é registrado com
+`updateViaCache: 'none'` (senão o próprio worker pode ficar até 24h preso no
+cache HTTP do navegador). O app procura versão nova ao abrir, toda vez que a
+aba volta a ficar visível e a cada 30 minutos. Achando, ela é aplicada
+sozinha e a página recarrega — **exceto** se houver um modal aberto, caso em
+que aparece um banner **Atualizar** para o operador decidir a hora, para não
+perder uma edição em andamento.
+
+**GitHub Pages de projeto.** O app é servido num subcaminho
+(`usuario.github.io/Mes/`), então todo caminho é relativo — `start_url`,
+`scope` e `id` do manifest são `"./"`, e o `sw.js` só usa `'./'`. Um único
+`/algo` apontaria para a raiz do domínio e daria 404.
+
+O service worker ignora requisições de outra origem: as chamadas ao Supabase
+nunca entram no cache.
 
 ## Estrutura
 
 ```
 index.html     app completo (HTML + CSS + JS)
+sw.js          service worker (cache offline + atualização automática)
 manifest.json  metadados PWA (instalar na tela inicial)
+supabase/      schema do banco em SQL (migrations + teste de RLS)
 ```
+
+## Nuvem (em migração)
+
+Os apontamentos **ainda ficam só no aparelho** — nada sobe para a nuvem por
+enquanto. O que já existe:
+
+- **Schema versionado** em `supabase/` — plantas, máquinas, motivos,
+  apontamentos e marcações, com RLS isolando uma planta da outra. Veja
+  [`supabase/README.md`](supabase/README.md) para aplicar e testar.
+- **Conta e planta** — em *Máquinas → Conta na nuvem* dá para entrar, criar
+  uma planta ou entrar numa existente pelo código, e testar a conexão. O
+  indicador **nuvem** no topo fica verde quando o aparelho está vinculado a
+  uma planta, e leva ao card com um toque.
+
+O app funciona por completo **sem login e sem internet**: nada é buscado na
+rede ao abrir, e falha de conexão vira mensagem no card, nunca tela travada.
+A chave que vai no `index.html` é a *publishable* do Supabase, pública por
+natureza — quem protege os dados é o RLS.
