@@ -6,7 +6,7 @@
        que dispara a instalação do novo worker e a limpeza do cache antigo — sem
        isso o aparelho instalado continua servindo a versão velha.
 
-       index.html:  var APP_VERSION='2.4.0'  →  aqui:  'mes-v2.4.0'
+       index.html:  var APP_VERSION='X.Y.Z'  →  aqui:  CACHE_NAME='mes-vX.Y.Z'
    ========================================================================== */
 const CACHE_NAME = 'mes-v2.4.0';
 
