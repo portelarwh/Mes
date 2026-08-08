@@ -8,12 +8,18 @@
 
        index.html:  var APP_VERSION='X.Y.Z'  →  aqui:  CACHE_NAME='mes-vX.Y.Z'
    ========================================================================== */
-const CACHE_NAME = 'mes-v2.4.0';
+const CACHE_NAME = 'mes-v2.5.0';
 
 /* Caminhos SEMPRE relativos: o app é servido num subcaminho no GitHub Pages de
    projeto (usuario.github.io/Mes/), e qualquer '/algo' apontaria para a raiz do
-   domínio, dando 404. */
-const ASSETS = ['./', './index.html', './manifest.json'];
+   domínio, dando 404.
+   Os ícones entram aqui porque o Android os busca na hora de instalar o app. */
+const ASSETS = [
+  './', './index.html', './manifest.json',
+  './assets/icon-192.png', './assets/icon-512.png',
+  './assets/icon-maskable-192.png', './assets/icon-maskable-512.png',
+  './assets/apple-touch-icon.png',
+];
 
 self.addEventListener('install', event => {
   event.waitUntil(

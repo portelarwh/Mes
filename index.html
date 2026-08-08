@@ -6,6 +6,11 @@
 <meta name="theme-color" content="#0d0d0d">
 <title>MES — Apontamento de Produção</title>
 <link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MES">
 <style>
   /* ============ Tokens (claro / escuro) ============ */
   :root {
@@ -98,6 +103,7 @@
     box-shadow: 0 6px 24px rgba(0,0,0,.28);
   }
   .upd-banner .pick { background: var(--accent); border-color: var(--accent); color: var(--btn-ink); }
+  .upd-banner .pick.ghost-x { background: none; border-color: var(--baseline); color: var(--muted); padding: 8px 11px; }
   .icon-btn {
     width: 34px; height: 34px; border-radius: 10px; border: 1px solid var(--ring);
     display: grid; place-items: center; font-size: 16px; background: var(--surface);
@@ -495,7 +501,7 @@
       3. replique o MESMO número no CACHE_NAME do sw.js ('mes-vX.Y.Z').
    Sem o passo 3 o aparelho com o PWA instalado continua na versão velha.
    Todo lugar que mostra versão lê daqui — não escreva o número na mão. */
-var APP_VERSION = '2.4.0';
+var APP_VERSION = '2.5.0';
 var APP_RELEASE_DATE = '2026-08-08';   /* AAAA-MM-DD */
 
 var LAST_CHECK_KEY = 'tc_ultima_verificacao';
@@ -2126,6 +2132,8 @@ function renderMaq() {
       <p class="hint" style="margin-top:10px">Desligado (padrão), esse tempo sai da base do OEE da máquina — ela não é penalizada por espera de outra máquina, mas o OEE real da linha continua mostrando a perda.</p>
     </div>
 
+    <div class="card" id="installCard"></div>
+
     <div class="card" id="cloudCard"></div>
 
     <div class="card">
@@ -2134,6 +2142,7 @@ function renderMaq() {
       <p class="hint" style="margin-top:8px">Os dados ficam salvos neste aparelho (localStorage) e o app abre offline. A tela permanece acesa enquanto estiver aberto (indicador “tela” no topo).</p>
     </div>`;
 
+  renderInstallCard();
   renderCloudCard();
 
   $('#mSave').onclick = () => {
@@ -2531,6 +2540,99 @@ if ('serviceWorker' in navigator) {
   setInterval(checarAtualizacao, 30 * 60 * 1000);
 }
 
+/* =====================================================
+   INSTALAÇÃO — PWA de verdade, não atalho
+   =====================================================
+   Atalho é o que o Android cria quando o site não cumpre os critérios de
+   instalação (ícone PNG de 192 e 512, manifest com start_url/scope/display e
+   um service worker com handler de fetch). Cumpridos os critérios, o Chrome
+   dispara `beforeinstallprompt` e gera um WebAPK — aí o app tem ícone próprio,
+   abre sem barra de endereço e conta como aplicativo instalado.             */
+let deferredPrompt = null;
+const DISMISS_KEY = 'mes_install_dispensado';
+
+/* rodando como app instalado? */
+const appInstalado = () =>
+  ['standalone', 'fullscreen', 'minimal-ui'].some(m => matchMedia('(display-mode: ' + m + ')').matches)
+  || navigator.standalone === true;
+
+const ehIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent)
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();               /* guardamos para disparar no clique do usuário */
+  deferredPrompt = e;
+  renderInstallCard();
+  if (!appInstalado() && !localStorage.getItem(DISMISS_KEY)) mostrarBannerInstall();
+});
+
+window.addEventListener('appinstalled', () => {
+  deferredPrompt = null;
+  localStorage.removeItem(DISMISS_KEY);
+  const b = document.getElementById('instBanner'); if (b) b.remove();
+  renderInstallCard();
+});
+
+function mostrarBannerInstall() {
+  if (document.getElementById('instBanner') || document.getElementById('updBanner')) return;
+  const el = document.createElement('div');
+  el.id = 'instBanner';
+  el.className = 'upd-banner';
+  el.innerHTML = '<span>Instale o MES no aparelho.</span><button class="pick">Instalar</button><button class="pick ghost-x" aria-label="Dispensar">✕</button>';
+  const [inst, close] = el.querySelectorAll('button');
+  inst.onclick = () => { el.remove(); dispararInstall(); };
+  close.onclick = () => { el.remove(); localStorage.setItem(DISMISS_KEY, '1'); };
+  document.body.appendChild(el);
+}
+
+/* A mensagem vive no estado, não no DOM: `renderInstallCard` roda de novo assim
+   que o prompt se resolve, e uma mensagem escrita direto no elemento seria
+   apagada antes de o operador ler. */
+let installMsg = '';
+function dispararInstall() {
+  if (!deferredPrompt) {
+    installMsg = 'O navegador não ofereceu a instalação agora; recarregue a página e tente de novo.';
+    renderInstallCard();
+    return Promise.resolve('indisponivel');
+  }
+  const p = deferredPrompt;
+  deferredPrompt = null;
+  p.prompt();
+  return p.userChoice.then(r => {
+    installMsg = r.outcome === 'accepted'
+      ? 'Instalando… procure o ícone do MES na tela inicial e abra o app por lá.'
+      : 'Instalação cancelada. Para instalar depois, use o menu ⋮ do navegador → “Instalar aplicativo”.';
+    renderInstallCard();
+    return r.outcome;
+  }).catch(() => { renderInstallCard(); return 'indisponivel'; });
+}
+
+function renderInstallCard() {
+  const el = document.getElementById('installCard'); if (!el) return;
+  const head = '<h2>Instalação</h2>';
+
+  const msg = `<p class="hint" id="instMsg" style="margin-top:10px">${esc(installMsg)}</p>`;
+
+  if (appInstalado()) {
+    el.innerHTML = `${head}<p class="hint">✓ Rodando como <b>app instalado</b> — sem barra de endereço, com ícone próprio e atualização automática em segundo plano.</p>`;
+    return;
+  }
+  if (deferredPrompt) {
+    el.innerHTML = `${head}
+      <p class="hint" style="margin-bottom:12px">Você está usando o MES pelo navegador. Instale para ter <b>ícone próprio</b>, abrir em tela cheia e continuar funcionando offline — é o app de verdade, não um atalho.</p>
+      <button class="btn" id="instBtn">📲 Instalar app</button>${msg}`;
+    $('#instBtn').onclick = () => dispararInstall();
+    return;
+  }
+  if (ehIOS()) {
+    el.innerHTML = `${head}
+      <p class="hint">No iPhone/iPad a instalação é manual: toque em <b>Compartilhar</b> (⬆️) na barra do Safari e escolha <b>“Adicionar à Tela de Início”</b>. O app passa a abrir em tela cheia, com ícone próprio.</p>${msg}`;
+    return;
+  }
+  el.innerHTML = `${head}
+    <p class="hint">Este navegador ainda não ofereceu a instalação. Ela aparece no <b>Chrome ou Edge</b>, com o site aberto por <b>HTTPS</b> — no menu ⋮ procure <b>“Instalar aplicativo”</b>. Se o app já estiver instalado, abra pelo ícone da tela inicial.</p>${msg}`;
+}
+
 /* ---------- pop-up de versão (badge no topo) ---------- */
 const fmtDateBR = iso => {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
@@ -2552,6 +2654,7 @@ function openVersionSheet() {
     ${row('v' + APP_VERSION, 'instalada neste aparelho')}
     ${row(fmtDateBR(APP_RELEASE_DATE), 'publicada em')}
     ${row(fmtUltimaVerificacao(), 'última verificação', 'vLast')}
+    ${row(appInstalado() ? 'app instalado' : 'navegador', 'como está aberto agora')}
     <p class="hint" id="vMsg"></p>
     <button class="btn" id="vCheck">Verificar agora</button>
     <button class="btn ghost" id="vClose">Fechar</button>`);
