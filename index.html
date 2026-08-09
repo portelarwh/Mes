@@ -66,6 +66,27 @@
     }
   }
 
+  /* ============ Splash ============ */
+  #splash {
+    position: fixed; inset: 0; z-index: 100;
+    display: grid; align-content: center; justify-items: center; gap: 2px;
+    background: var(--page); color: var(--ink);
+    transition: opacity .35s ease;
+  }
+  #splash img {
+    width: 128px; height: 128px; border-radius: 28px; margin-bottom: 18px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.28);
+  }
+  #splash .nm { font-size: 26px; font-weight: 800; letter-spacing: .04em; }
+  #splash .sub { font-size: 13px; color: var(--muted); }
+  #splash .vr {
+    margin-top: 14px; font-size: 11px; font-weight: 600; color: var(--ink-2);
+    border: 1px solid var(--ring); border-radius: 999px; padding: 3px 10px;
+    font-variant-numeric: tabular-nums; min-height: 22px;
+  }
+  #splash.hide { opacity: 0; pointer-events: none; }
+  @media (prefers-reduced-motion: reduce) { #splash { transition: none; } }
+
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   html { height: 100%; }
   body {
@@ -443,6 +464,20 @@
 </head>
 <body>
 
+<!-- Splash: fica no HTML (não é criado por JS) para aparecer já no primeiro
+     quadro, antes de o app montar. O app o remove quando termina de renderizar;
+     o failsafe abaixo garante a saída mesmo se o app falhar ao carregar. -->
+<div id="splash">
+  <img src="assets/icon-512.png" alt="" width="128" height="128">
+  <div class="nm">MES</div>
+  <div class="sub">Apontamento de Produção</div>
+  <div class="vr" id="splashVer"></div>
+</div>
+<script>setTimeout(function () {
+  var s = document.getElementById('splash');
+  if (s) s.classList.add('hide');
+}, 2500);</script>
+
 <header>
   <h1>MES</h1>
   <div class="desknav">
@@ -501,11 +536,12 @@
       3. replique o MESMO número no CACHE_NAME do sw.js ('mes-vX.Y.Z').
    Sem o passo 3 o aparelho com o PWA instalado continua na versão velha.
    Todo lugar que mostra versão lê daqui — não escreva o número na mão. */
-var APP_VERSION = '2.5.0';
+var APP_VERSION = '2.5.1';
 var APP_RELEASE_DATE = '2026-08-08';   /* AAAA-MM-DD */
 
 var LAST_CHECK_KEY = 'tc_ultima_verificacao';
 document.getElementById('verBadge').textContent = 'v' + APP_VERSION;
+document.getElementById('splashVer').textContent = 'v' + APP_VERSION;
 
 const STATES = {
   prod: { label: 'Produzindo',            btn: 'Produção',  sub: 'contagem teórica ativa', color: 'var(--st-prod)', cls: 'prod' },
@@ -2698,6 +2734,15 @@ function render() {
 $('#cloudInd').onclick = () => goTab('maq');
 $('#verBadge').onclick = openVersionSheet;
 render();
+
+/* app montado: tira o splash (com um mínimo de tela para não piscar) */
+setTimeout(() => {
+  const s = $('#splash');
+  if (!s) return;
+  s.classList.add('hide');
+  s.addEventListener('transitionend', () => s.remove(), { once: true });
+  setTimeout(() => s.remove(), 800);   /* caso a transição não dispare */
+}, 700);
 </script>
 </body>
 </html>
