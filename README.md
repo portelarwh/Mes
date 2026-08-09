@@ -175,6 +175,7 @@ Sem o toque em “Manutenção chegou”, a parada inteira conta como reparo
 
 ## Recursos
 
+- **Splash** ao abrir, com o logo, o nome e a versão do app.
 - **Tema claro e escuro** (botão ◐ no topo; segue o sistema por padrão).
 - **Versão clicável no topo direito** — abre um pop-up com a versão instalada,
   a data de publicação, a última verificação e um botão **Verificar agora**.
@@ -216,6 +217,14 @@ explica o caminho manual: *Compartilhar → Adicionar à Tela de Início*.
 Para conferir num aparelho: toque no número da versão no topo — o pop-up
 mostra **“como está aberto agora”**, com *app instalado* ou *navegador*.
 
+Os ícones em `assets/` saem todos da mesma arte. O `icon-512.png` também é o
+logo do **splash** do app, então não custa download extra: já está no cache do
+service worker. Para trocar a arte, regenere as cinco variantes a partir do
+original — o recorte é diferente em cada uma: os `any` levam corte justo com
+transparência, os `maskable` levam fundo sangrando e a arte a 80% (o Android
+recorta em círculo), e o `apple-touch` precisa de fundo opaco porque o iOS
+transforma transparência em preto.
+
 ## Versão e atualização automática
 
 ⚠️ **Regra permanente — a cada mudança publicada, mexa nos três:**
@@ -255,7 +264,7 @@ nunca entram no cache.
 index.html     app completo (HTML + CSS + JS)
 sw.js          service worker (cache offline + atualização automática)
 manifest.json  metadados PWA (instalação como app)
-assets/        ícones PNG do app (192, 512, maskable e apple-touch)
+assets/        ícones PNG do app (192, 512, maskable, apple-touch) — também usados no splash
 supabase/      schema do banco em SQL (migrations + teste de RLS)
 ```
 
