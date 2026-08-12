@@ -1,6 +1,6 @@
 {
-  "name": "MES — Apontamento de Produção",
-  "short_name": "MES",
+  "name": "MES - OEE",
+  "short_name": "MES - OEE",
   "description": "Apontamento manual de produção, paradas e refugo ao lado da máquina.",
   "id": "./",
   "start_url": "./",
