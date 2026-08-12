@@ -1,4 +1,4 @@
-# MES — Apontamento de Produção
+# MES - OEE — Apontamento de Produção
 
 App web simples (um único `index.html`, sem dependências) para fazer apontamentos
 manuais ao lado da máquina: **produção, paradas, ociosidade, espera e refugo** —

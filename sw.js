@@ -1,5 +1,5 @@
 /* =============================================================================
-   MES — service worker
+   MES - OEE — service worker
    =============================================================================
    ⚠️  REGRA PERMANENTE: a cada versão publicada, suba o CACHE_NAME abaixo para
        o MESMO número do APP_VERSION do index.html. É a troca do nome do cache
@@ -8,7 +8,7 @@
 
        index.html:  var APP_VERSION='X.Y.Z'  →  aqui:  CACHE_NAME='mes-vX.Y.Z'
    ========================================================================== */
-const CACHE_NAME = 'mes-v2.6.0';
+const CACHE_NAME = 'mes-v2.6.1';
 
 /* Caminhos SEMPRE relativos: o app é servido num subcaminho no GitHub Pages de
    projeto (usuario.github.io/Mes/), e qualquer '/algo' apontaria para a raiz do

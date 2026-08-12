@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="theme-color" content="#0d0d0d">
-<title>MES — Apontamento de Produção</title>
+<title>MES - OEE</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png">
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="MES">
+<meta name="apple-mobile-web-app-title" content="MES - OEE">
 <style>
   /* ============ Tokens (claro / escuro) ============ */
   :root {
@@ -480,7 +480,7 @@
      o failsafe abaixo garante a saída mesmo se o app falhar ao carregar. -->
 <div id="splash">
   <img src="assets/icon-512.png" alt="" width="128" height="128">
-  <div class="nm">MES</div>
+  <div class="nm">MES - OEE</div>
   <div class="sub">Apontamento de Produção</div>
   <div class="vr" id="splashVer"></div>
 </div>
@@ -490,7 +490,7 @@
 }, 2500);</script>
 
 <header>
-  <h1>MES</h1>
+  <h1>MES - OEE</h1>
   <div class="desknav">
     <button data-tab="apontar" class="active">⏱ Apontar</button>
     <button data-tab="manual">✎ Manual</button>
@@ -536,7 +536,7 @@
 
 <script>
 /* =====================================================
-   MES — Apontamento de produção, paradas e refugo
+   MES - OEE — Apontamento de produção, paradas e refugo
    ===================================================== */
 /* ============================ FONTE ÚNICA DE VERSÃO =========================
    ⚠️ REGRA PERMANENTE — a cada mudança publicada:
@@ -545,7 +545,13 @@
       3. replique o MESMO número no CACHE_NAME do sw.js ('mes-vX.Y.Z').
    Sem o passo 3 o aparelho com o PWA instalado continua na versão velha.
    Todo lugar que mostra versão lê daqui — não escreva o número na mão. */
-var APP_VERSION = '2.6.0';
+/* Nome do app. Vale para tudo que o JS escreve (relatório, tela Sobre, convite
+   de instalação). Os lugares que precisam existir antes do JS rodar carregam o
+   nome escrito à mão e mudam junto numa renomeação:
+   <title>, <meta apple-mobile-web-app-title>, o <h1> do header, o splash e o
+   "name"/"short_name" do manifest.json. */
+var APP_NAME = 'MES - OEE';
+var APP_VERSION = '2.6.1';
 var APP_RELEASE_DATE = '2026-08-08';   /* AAAA-MM-DD */
 
 var LAST_CHECK_KEY = 'tc_ultima_verificacao';
@@ -2180,7 +2186,7 @@ function renderMaq() {
 
     <div class="card">
       <h2>Sobre</h2>
-      <p class="hint">MES de apontamento manual — versão <b>v${APP_VERSION}</b>, publicada em ${fmtDateBR(APP_RELEASE_DATE)}. Toque no número da versão no topo para ver quando foi a última verificação e buscar atualização na hora. O app se atualiza sozinho quando há versão nova no servidor.</p>
+      <p class="hint">${APP_NAME} — apontamento manual de produção. Versão <b>v${APP_VERSION}</b>, publicada em ${fmtDateBR(APP_RELEASE_DATE)}. Toque no número da versão no topo para ver quando foi a última verificação e buscar atualização na hora. O app se atualiza sozinho quando há versão nova no servidor.</p>
       <p class="hint" style="margin-top:8px">Os dados ficam salvos neste aparelho (localStorage) e o app abre offline.</p>
       <p class="hint" style="margin-top:10px"><span class="wake" id="wakeInd"><span class="dot"></span>tela sempre acesa</span></p>
     </div>`;
@@ -2340,7 +2346,7 @@ function buildReportSVG(d) {
   s += txt(24, 42, 'Relatório Executivo — Produção', 21, 800, C.ink);
   s += txt(24, 62, `Período: ${PERIODS[db.period][0]} · ${perMachine.length} máquina(s) · ${done.length} apontamento(s)`, 12, 600, C.ink2);
   s += txt(W - 24, 40, `Gerado em ${new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`, 11, 600, C.ink2, 'end');
-  s += txt(W - 24, 58, `MES v${APP_VERSION}`, 11, 700, C.muted, 'end');
+  s += txt(W - 24, 58, `${APP_NAME} v${APP_VERSION}`, 11, 700, C.muted, 'end');
 
   const y1 = 78, h1 = 236, y2 = y1 + h1 + 12, h2 = 212, y3 = y2 + h2 + 12, h3 = 216;
 
@@ -2472,7 +2478,7 @@ function buildReportSVG(d) {
   if (perMachine.length > 5) s += txt(40, y3 + 78 + 5 * 26, `+ ${perMachine.length - 5} máquina(s) não exibida(s)`, 10.5, 600, C.muted);
 
   /* rodapé */
-  s += txt(24, H - 12, `MES — OEE = Disp. × Perf. × Qual. · OEE máquina desconta ${o.excl > 0 ? 'ociosidade/espera de outras máquinas' : 'nada (tudo conta)'} · OEE real = linha inteira`, 9.5, 600, C.muted);
+  s += txt(24, H - 12, `OEE = Disp. × Perf. × Qual. · OEE máquina desconta ${o.excl > 0 ? 'ociosidade/espera de outras máquinas' : 'nada (tudo conta)'} · OEE real = linha inteira`, 9.5, 600, C.muted);
   s += txt(W - 24, H - 12, 'dados registrados no aparelho', 9.5, 600, C.muted, 'end');
   s += '</svg>';
   return s;
@@ -2622,7 +2628,7 @@ function mostrarBannerInstall() {
   const el = document.createElement('div');
   el.id = 'instBanner';
   el.className = 'upd-banner';
-  el.innerHTML = '<span>Instale o MES no aparelho.</span><button class="pick">Instalar</button><button class="pick ghost-x" aria-label="Dispensar">✕</button>';
+  el.innerHTML = `<span>Instale o ${APP_NAME} no aparelho.</span><button class="pick">Instalar</button><button class="pick ghost-x" aria-label="Dispensar">✕</button>`;
   const [inst, close] = el.querySelectorAll('button');
   inst.onclick = () => { el.remove(); dispararInstall(); };
   close.onclick = () => { el.remove(); localStorage.setItem(DISMISS_KEY, '1'); };
@@ -2644,7 +2650,7 @@ function dispararInstall() {
   p.prompt();
   return p.userChoice.then(r => {
     installMsg = r.outcome === 'accepted'
-      ? 'Instalando… procure o ícone do MES na tela inicial e abra o app por lá.'
+      ? `Instalando… procure o ícone do ${APP_NAME} na tela inicial e abra o app por lá.`
       : 'Instalação cancelada. Para instalar depois, use o menu ⋮ do navegador → “Instalar aplicativo”.';
     renderInstallCard();
     return r.outcome;
@@ -2663,7 +2669,7 @@ function renderInstallCard() {
   }
   if (deferredPrompt) {
     el.innerHTML = `${head}
-      <p class="hint" style="margin-bottom:12px">Você está usando o MES pelo navegador. Instale para ter <b>ícone próprio</b>, abrir em tela cheia e continuar funcionando offline — é o app de verdade, não um atalho.</p>
+      <p class="hint" style="margin-bottom:12px">Você está usando o ${APP_NAME} pelo navegador. Instale para ter <b>ícone próprio</b>, abrir em tela cheia e continuar funcionando offline — é o app de verdade, não um atalho.</p>
       <button class="btn" id="instBtn">📲 Instalar app</button>${msg}`;
     $('#instBtn').onclick = () => dispararInstall();
     return;
