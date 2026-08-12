@@ -8,7 +8,7 @@
 
        index.html:  var APP_VERSION='X.Y.Z'  →  aqui:  CACHE_NAME='mes-vX.Y.Z'
    ========================================================================== */
-const CACHE_NAME = 'mes-v2.5.1';
+const CACHE_NAME = 'mes-v2.6.0';
 
 /* Caminhos SEMPRE relativos: o app é servido num subcaminho no GitHub Pages de
    projeto (usuario.github.io/Mes/), e qualquer '/algo' apontaria para a raiz do
