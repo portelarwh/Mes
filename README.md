@@ -176,12 +176,16 @@ Sem o toque em “Manutenção chegou”, a parada inteira conta como reparo
 ## Recursos
 
 - **Splash** ao abrir, com o logo, o nome e a versão do app.
+- **Header padrão** — nome do app à esquerda, tema e versão à direita, e nada
+  mais. Fica preso no topo com fundo translúcido, então o conteúdo passa por
+  trás em vez de ser tampado. Mesmo cabeçalho em todos os apps: para levar,
+  copie o `<header>` e o bloco de CSS e troque só o texto do `h1`.
 - **Tema claro e escuro** (botão ◐ no topo; segue o sistema por padrão).
 - **Versão clicável no topo direito** — abre um pop-up com a versão instalada,
   a data de publicação, a última verificação e um botão **Verificar agora**.
 - **Atualização automática** — ver abaixo.
 - **Tela sempre acesa** enquanto o app está aberto (Wake Lock API; requer
-  HTTPS — o indicador “tela” fica verde quando ativo).
+  HTTPS — o indicador “tela” fica verde em *Máquinas → Sobre*).
 - **Dados no aparelho** — tudo fica em `localStorage`; funciona offline. Um
   apontamento em andamento sobrevive a recarregar a página (os tempos são
   derivados de timestamps).

@@ -99,14 +99,27 @@
   button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
   input, select { font: inherit; color: var(--ink); }
 
-  /* ============ Header ============ */
+  /* ============ Header ============
+     Padrão dos apps: nome à esquerda, tema e versão à direita, nessa ordem.
+     Nada mais entra aqui — status e indicadores vivem dentro das telas.
+     Fica preso no topo e o conteúdo passa por trás: o fundo é translúcido com
+     desfoque, então dá para ver que há algo rolando embaixo em vez de tampar. */
   header {
     position: sticky; top: 0; z-index: 20;
     display: flex; align-items: center; gap: 8px;
     padding: calc(10px + env(safe-area-inset-top)) 14px 10px;
-    background: var(--page); border-bottom: 1px solid var(--grid);
+    background: color-mix(in srgb, var(--page) 72%, transparent);
+    -webkit-backdrop-filter: saturate(180%) blur(14px);
+    backdrop-filter: saturate(180%) blur(14px);
+    border-bottom: 1px solid var(--grid);
   }
-  header h1 { font-size: 17px; font-weight: 700; flex: 1; }
+  /* navegador sem desfoque (ou sem color-mix): volta a ser opaco */
+  @supports not (backdrop-filter: blur(2px)) { header { background: var(--page); } }
+  @supports not (color: color-mix(in srgb, red 50%, transparent)) { header { background: var(--page); } }
+  header h1 {
+    font-size: 17px; font-weight: 700; flex: 1; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
   .ver {
     font-size: 11px; font-weight: 600; color: var(--ink-2);
     border: 1px solid var(--ring); border-radius: 999px; padding: 3px 8px;
@@ -132,8 +145,6 @@
   .wake { font-size: 10px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
   .wake .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
   .wake.on .dot { background: var(--good); }
-  #cloudInd { flex: none; max-width: 96px; cursor: pointer; }
-  #cloudInd .tx { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* ============ Layout ============ */
   main { padding: 14px; display: grid; gap: 14px; }
@@ -486,8 +497,6 @@
     <button data-tab="dash">◔ Dashboard</button>
     <button data-tab="maq">⚙ Máquinas</button>
   </div>
-  <span class="wake" id="wakeInd" title="Tela sempre acesa"><span class="dot"></span>tela</span>
-  <button class="wake" id="cloudInd" title="Conta na nuvem"><span class="dot"></span><span class="tx">nuvem</span></button>
   <button class="icon-btn" id="themeBtn" aria-label="Alternar tema">◐</button>
   <button class="ver" id="verBadge" title="Versão do app — toque para verificar atualizações">v0.0.0</button>
 </header>
@@ -536,7 +545,7 @@
       3. replique o MESMO número no CACHE_NAME do sw.js ('mes-vX.Y.Z').
    Sem o passo 3 o aparelho com o PWA instalado continua na versão velha.
    Todo lugar que mostra versão lê daqui — não escreva o número na mão. */
-var APP_VERSION = '2.5.1';
+var APP_VERSION = '2.6.0';
 var APP_RELEASE_DATE = '2026-08-08';   /* AAAA-MM-DD */
 
 var LAST_CHECK_KEY = 'tc_ultima_verificacao';
@@ -751,12 +760,19 @@ applyTheme();
 
 /* ---------- wake lock (tela sempre acesa) ---------- */
 let wakeLock = null;
+/* o header não carrega mais indicador: o estado vira variável e aparece na
+   aba Máquinas → Sobre, que é onde se vai procurar por isso */
+let wakeAtivo = false;
+function pintaWake() {
+  const el = document.getElementById('wakeInd');
+  if (el) el.classList.toggle('on', wakeAtivo);
+}
 async function keepAwake() {
   try {
     if ('wakeLock' in navigator) {
       wakeLock = await navigator.wakeLock.request('screen');
-      document.getElementById('wakeInd').classList.add('on');
-      wakeLock.addEventListener('release', () => document.getElementById('wakeInd').classList.remove('on'));
+      wakeAtivo = true; pintaWake();
+      wakeLock.addEventListener('release', () => { wakeAtivo = false; pintaWake(); });
     }
   } catch (e) { /* precisa de HTTPS + interação em alguns navegadores */ }
 }
@@ -1983,19 +1999,9 @@ function bindChips(el) {
    ===================================================== */
 let editingId = null;
 /* =====================================================
-   NUVEM — indicador no topo e card de conta
+   NUVEM — card de conta (o estado vive na aba Máquinas,
+   não mais num indicador no header)
    ===================================================== */
-function updateCloudInd() {
-  const el = $('#cloudInd'); if (!el) return;
-  const ok = signedIn() && hasOrg();
-  el.classList.toggle('on', ok);
-  $('.tx', el).textContent = !cloudOn() ? 'sem nuvem'
-    : !signedIn() ? 'nuvem' : ok ? auth.org.name : 'sem planta';
-  el.title = ok ? `Conectado como ${auth.user.email} · planta ${auth.org.name}`
-    : signedIn() ? 'Sua conta ainda não pertence a nenhuma planta'
-    : 'Toque para entrar na sua conta';
-}
-
 function cloudMsg(txt, bad) {
   const el = $('#cloudMsg'); if (!el) return;
   el.innerHTML = !txt ? '' : bad
@@ -2009,7 +2015,7 @@ function cloudRun(btn, fn, okTxt) {
   btn.disabled = true; btn.textContent = 'aguarde…';
   cloudMsg('');
   Promise.resolve().then(fn).then(res => {
-    renderCloudCard(); updateCloudInd();
+    renderCloudCard();
     cloudMsg(typeof okTxt === 'function' ? okTxt(res) : okTxt);
   }).catch(e => {
     btn.disabled = false; btn.textContent = label;
@@ -2175,11 +2181,13 @@ function renderMaq() {
     <div class="card">
       <h2>Sobre</h2>
       <p class="hint">MES de apontamento manual — versão <b>v${APP_VERSION}</b>, publicada em ${fmtDateBR(APP_RELEASE_DATE)}. Toque no número da versão no topo para ver quando foi a última verificação e buscar atualização na hora. O app se atualiza sozinho quando há versão nova no servidor.</p>
-      <p class="hint" style="margin-top:8px">Os dados ficam salvos neste aparelho (localStorage) e o app abre offline. A tela permanece acesa enquanto estiver aberto (indicador “tela” no topo).</p>
+      <p class="hint" style="margin-top:8px">Os dados ficam salvos neste aparelho (localStorage) e o app abre offline.</p>
+      <p class="hint" style="margin-top:10px"><span class="wake" id="wakeInd"><span class="dot"></span>tela sempre acesa</span></p>
     </div>`;
 
   renderInstallCard();
   renderCloudCard();
+  pintaWake();
 
   $('#mSave').onclick = () => {
     const name = $('#mNome').value.trim();
@@ -2729,9 +2737,7 @@ function render() {
   if (tab === 'manual') renderManual();
   if (tab === 'dash') renderDash();
   if (tab === 'maq') renderMaq();
-  updateCloudInd();
 }
-$('#cloudInd').onclick = () => goTab('maq');
 $('#verBadge').onclick = openVersionSheet;
 render();
 
